@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+.next/
+.output/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Testing
+coverage/
+.nyc_output/
+
+# Database
+*.sqlite
+*.db
+
+# Neo4j
+neo4j/data/
+
+# Docker
+.docker/
+
+# Misc
+*.pem
+.cache/
+
+# Large Models (download separately - see models/README.md)
+models/
+
+# Python Virtual Environments
+.ocr-venv/
+venv/
+env/
+.venv/
