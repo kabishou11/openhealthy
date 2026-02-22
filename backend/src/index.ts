@@ -27,9 +27,14 @@ import websocket from '@fastify/websocket';
 import rateLimit from '@fastify/rate-limit';
 // Note: For file uploads, use built-in request body parsing
 
+import { authRoutes } from './routes/auth.js';
 import { healthRoutes } from './routes/health.js';
+import { healthRoutes as healthRecordsRoutes } from './routes/health-records.js';
 import { nutritionRoutes } from './routes/nutrition.js';
-import { menuRoutes } from './routes/menu.js';
+import { menuRoutes } from './routes/menus.js';
+import { menuRoutes as recipeRoutes } from './routes/menu.js';
+import { dishRoutes } from './routes/dishes.js';
+import { studentRoutes } from './routes/students.js';
 import { chatRoutes } from './routes/chat.js';
 import { agentRoutes } from './routes/agents.js';
 import { institutionRoutes } from './routes/institution.js';
@@ -40,6 +45,7 @@ import { registerPromptsRoutes } from './routes/prompts.js';
 import { registerOCRRoutes } from './routes/ocr.js';
 import { websocketHandler } from './websocket/handler.js';
 import { createLogger } from './utils/logger.js';
+import { initializeDatabase, seedDemoUser } from './models/db.js';
 
 const logger = createLogger('nutrimind-api');
 
@@ -177,10 +183,19 @@ async function main() {
     timeWindow: '1 minute',
   });
 
+  // Initialize database
+  initializeDatabase();
+  seedDemoUser();
+
   // Register routes
+  await app.register(authRoutes);
   await app.register(healthRoutes);
+  await app.register(healthRecordsRoutes);
   await app.register(nutritionRoutes);
   await app.register(menuRoutes);
+  await app.register(recipeRoutes);
+  await app.register(dishRoutes);
+  await app.register(studentRoutes);
   await app.register(chatRoutes);
   await app.register(agentRoutes);
   await app.register(institutionRoutes);

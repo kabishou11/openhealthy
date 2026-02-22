@@ -32,11 +32,18 @@ export { computedAsync, asyncComputed, computedEager, eagerComputed, computedInj
 export { createGenericProjection, createProjection, logicAnd, logicNot, logicOr, useAbs, useAverage, useCeil, useClamp, useFloor, useMath, useMax, useMin, usePrecision, useProjection, useRound, useSum, useTrunc } from '@vueuse/math';
 export { definePageMeta } from '../../node_modules/nuxt/dist/pages/runtime/composables';
 export { defineLazyHydrationComponent } from '#app/composables/lazy-hydration';
+export { useDashboardAPI } from '../composables/useDashboard';
 export { useEmojiAnimation } from '../composables/useEmojiAnimation';
+export { useHealthAPI } from '../composables/useHealth';
 export { useLLMModel, useChat, LLMModel } from '../composables/useLLMModel';
+export { useMenusAPI } from '../composables/useMenus';
 export { LLM_MODELS, EMBEDDING_MODELS, useModelScope, ModelScopeConfig, ChatMessage, ChatCompletionParams, ChatCompletionResponse, EmbeddingParams, EmbeddingResponse } from '../composables/useModelScope';
+export { useModelsAPI, ModelInfo } from '../composables/useModels';
+export { useOCR, OCRStatus, HealthCheckupData, OCRResult } from '../composables/useOCR';
 export { useRAG, RAGConfig, RAGQuery, RAGSource, RAGResponse } from '../composables/useRAG';
 export { shuffleArray, useRandomDraw, useSlotMachine, useEmojiPicker } from '../composables/useRandomDraw';
+export { useSchoolsAPI } from '../composables/useSchools';
+export { useStudentsAPI } from '../composables/useStudents';
 export { ShortcutConfig, ShortcutsConfig, ShortcutsOptions } from '../../node_modules/@nuxt/ui/dist/runtime/composables/defineShortcuts.d';
 export { defineShortcuts } from '../../node_modules/@nuxt/ui/dist/runtime/composables/defineShortcuts';
 export { useProvideButtonGroup, useInjectButtonGroup } from '../../node_modules/@nuxt/ui/dist/runtime/composables/useButtonGroup';
@@ -50,6 +57,7 @@ export { slidOverInjectionKey, useSlideover } from '../../node_modules/@nuxt/ui/
 export { useTimer } from '../../node_modules/@nuxt/ui/dist/runtime/composables/useTimer';
 export { useToast } from '../../node_modules/@nuxt/ui/dist/runtime/composables/useToast';
 export { useUI } from '../../node_modules/@nuxt/ui/dist/runtime/composables/useUI';
+export { useAuthStore } from '../stores/auth';
 export { useColorMode } from '../../node_modules/@nuxtjs/color-mode/dist/runtime/composables';
 export { defineStore, acceptHMRUpdate, usePinia, storeToRefs } from '../../node_modules/@pinia/nuxt/dist/runtime/composables';
 export { useNuxtDevTools } from '../node_modules/@nuxt/devtools/dist/runtime/use-nuxt-devtools';

@@ -1,9 +1,17 @@
 <script setup lang="ts">
+import { useAuthStore } from '~/stores/auth'
+
 const route = useRoute()
+const authStore = useAuthStore()
+
+// Initialize auth state on app mount
+onMounted(() => {
+  authStore.init()
+})
 
 // 判断是否显示导航栏（首页隐藏，登录页等特殊页面可以添加）
 const showNavBar = computed(() => {
-  return route.path !== '/'
+  return route.path !== '/' && route.path !== '/login' && route.path !== '/register'
 })
 </script>
 

@@ -1,0 +1,6 @@
+{
+  "enabledPlugins": {
+    "code-review@claude-code-plugins": true,
+    "commit-commands@claude-code-plugins": true
+  }
+}

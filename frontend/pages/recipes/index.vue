@@ -78,6 +78,17 @@ const icons = {
     <path d="M9 12l2 2 4-4" stroke="url(#easyGrad)" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>`,
 
+  all: `<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <defs>
+      <linearGradient id="allGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" style="stop-color:#6366F1"/>
+        <stop offset="100%" style="stop-color:#8B5CF6"/>
+      </linearGradient>
+    </defs>
+    <circle cx="12" cy="12" r="3" stroke="url(#allGrad)"/>
+    <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M4.93 19.07l1.41-1.41M17.66 7.34l1.41-1.41" stroke="url(#allGrad)" stroke-linecap="round"/>
+  </svg>`,
+
   medium: `<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
     <defs>
       <linearGradient id="medGrad" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -139,7 +150,20 @@ const searchQuery = ref('')
 const selectedCategory = ref('all')
 const selectedDifficulty = ref('all')
 
-const categories = ['all', '凉菜', '主菜', '蔬菜', '早餐', '汤类', '主食']
+// Category mapping: frontend display name -> backend category value
+const categoryMap: Record<string, string> = {
+  'all': 'all',
+  '凉菜': '凉菜',
+  '主菜': '荤菜',
+  '蔬菜': '素菜',
+  '早餐': '早餐',
+  '汤类': '汤',
+  '主食': '主食',
+  '水产': '水产',
+  '甜品': '甜品',
+}
+
+const categories = ['all', '凉菜', '主菜', '蔬菜', '早餐', '汤类', '主食', '水产', '甜品']
 const difficulties = ['all', 'easy', 'medium', 'hard']
 
 const config = useRuntimeConfig()
@@ -150,7 +174,10 @@ const fetchRecipes = async () => {
   try {
     const params = new URLSearchParams()
     if (searchQuery.value) params.set('query', searchQuery.value)
-    if (selectedCategory.value !== 'all') params.set('category', selectedCategory.value)
+    // Map frontend category to backend category
+    if (selectedCategory.value !== 'all') {
+      params.set('category', categoryMap[selectedCategory.value] || selectedCategory.value)
+    }
     if (selectedDifficulty.value !== 'all') params.set('difficulty', selectedDifficulty.value)
 
     const response = await fetch(`${apiBase}/menu/recipes?${params}`)
@@ -228,6 +255,7 @@ const getMockRecipes = (): Recipe[] => [
 ]
 
 const getDifficultyIcon = (difficulty: string) => {
+  if (difficulty === 'all') return icons.all
   return icons[difficulty as keyof typeof icons] || icons.easy
 }
 
@@ -241,6 +269,7 @@ const getDifficultyLabel = (difficulty: string) => {
 }
 
 const getDifficultyColor = (difficulty: string) => {
+  if (difficulty === 'all') return 'from-violet-500 to-purple-500'
   const colors: Record<string, string> = {
     easy: 'from-emerald-400 to-teal-500',
     medium: 'from-amber-400 to-orange-500',
@@ -302,7 +331,7 @@ watch([searchQuery, selectedCategory, selectedDifficulty], () => {
           </div>
           <div class="flex gap-2">
             <button
-              v-for="diff in difficulties.slice(1)"
+              v-for="diff in difficulties"
               :key="diff"
               @click="selectedDifficulty = diff"
               class="flex items-center gap-2 px-4 py-2 rounded-xl text-sm transition-all duration-300"
@@ -311,7 +340,7 @@ watch([searchQuery, selectedCategory, selectedDifficulty], () => {
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
             >
               <span v-html="getDifficultyIcon(diff)"></span>
-              {{ getDifficultyLabel(diff) }}
+              {{ diff === 'all' ? '全部' : getDifficultyLabel(diff) }}
             </button>
           </div>
         </div>

@@ -194,6 +194,16 @@ const menuVariations = [
 
 const selectedVariation = ref(0)
 const weeklyMenu = ref<DayMenu[]>(defaultMenu)
+const regeneratingDay = ref<string | null>(null)
+const regeneratingMeal = ref<string | null>(null)
+const successMessage = ref('')
+let successTimer: ReturnType<typeof setTimeout> | null = null
+
+const showSuccess = (msg: string) => {
+  successMessage.value = msg
+  if (successTimer) clearTimeout(successTimer)
+  successTimer = setTimeout(() => { successMessage.value = '' }, 3000)
+}
 
 const dayNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
@@ -309,20 +319,20 @@ const generateMenu = async () => {
       if (response.ok) {
         const data = await response.json()
         if (data.plan && data.plan.weeklyPlan && data.plan.weeklyPlan.length > 0) {
-          // Convert from new format to old format
           weeklyMenu.value = convertToMenuFormat(data.plan.weeklyPlan)
+          showSuccess('餐单已重新生成 ✓')
           loading.value = false
           return
         }
       }
     }
     catch (e) {
-      console.log('Backend menu generation failed, using demo mode...', e)
+      console.log('Backend menu generation failed:', e)
     }
 
-    // Demo mode - apply selected variation
-    await new Promise(resolve => setTimeout(resolve, 1500))
+    // Fallback: apply selected variation
     applyVariation(menuVariations[selectedVariation.value])
+    showSuccess('餐单已更新 ✓')
   }
   finally {
     loading.value = false
@@ -345,17 +355,71 @@ const convertToMenuFormat = (weeklyPlan: any[]) => {
 
 // Regenerate specific day
 const regenerateDay = async (day: string) => {
-  loading.value = true
-  selectedVariation.value = (selectedVariation.value + 1) % menuVariations.length
-  await generateMenu()
+  regeneratingDay.value = day
+  try {
+    const config = useRuntimeConfig()
+    const apiBase = config.public.apiBase || 'http://localhost:3001'
+    const response = await fetch(`${apiBase}/api/v1/menu/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targets: { calories: dailyCalories.value },
+        options: { duration: 1 },
+      }),
+    })
+    if (response.ok) {
+      const data = await response.json()
+      if (data.plan?.weeklyPlan?.length > 0) {
+        const newDayData = convertToMenuFormat(data.plan.weeklyPlan)[0]
+        newDayData.day = day
+        weeklyMenu.value = weeklyMenu.value.map(d => d.day === day ? newDayData : d)
+        showSuccess(`${day}餐单已重新生成 ✓`)
+      }
+    }
+  }
+  catch (e) {
+    console.error('Regenerate day failed:', e)
+  }
+  finally {
+    regeneratingDay.value = null
+  }
 }
 
 // Regenerate specific meal
 const regenerateMeal = async (day: string, mealType: string) => {
-  loading.value = true
-  // For demo, just update with new variation
-  selectedVariation.value = (selectedVariation.value + 1) % menuVariations.length
-  await generateMenu()
+  regeneratingMeal.value = `${day}-${mealType}`
+  try {
+    const config = useRuntimeConfig()
+    const apiBase = config.public.apiBase || 'http://localhost:3001'
+    const response = await fetch(`${apiBase}/api/v1/menu/random-meal?type=${encodeURIComponent(mealType)}`)
+    if (response.ok) {
+      const newMeal = await response.json()
+      weeklyMenu.value = weeklyMenu.value.map(d => {
+        if (d.day !== day) return d
+        const updatedMeals = d.meals.map(m => {
+          if (m.type !== mealType) return m
+          return {
+            type: mealType,
+            name: mealType,
+            dishes: newMeal.dishes?.map((dish: any) => dish.name) || [],
+            calories: newMeal.totalNutrition?.calories || 500,
+          }
+        })
+        return {
+          ...d,
+          meals: updatedMeals,
+          totalCalories: updatedMeals.reduce((sum: number, m: any) => sum + m.calories, 0),
+        }
+      })
+      showSuccess(`${mealType}已重新生成 ✓`)
+    }
+  }
+  catch (e) {
+    console.error('Regenerate meal failed:', e)
+  }
+  finally {
+    regeneratingMeal.value = null
+  }
 }
 
 // Jump to today
@@ -381,6 +445,19 @@ onMounted(() => {
 
 <template>
   <div class="min-h-screen bg-gray-50">
+    <!-- Success Toast -->
+    <Transition name="toast">
+      <div
+        v-if="successMessage"
+        class="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-6 py-3 bg-emerald-500 text-white rounded-2xl shadow-xl shadow-emerald-500/30 flex items-center gap-2 font-medium"
+      >
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+        </svg>
+        {{ successMessage }}
+      </div>
+    </Transition>
+
     <div class="container mx-auto px-4 py-8">
       <!-- Header -->
       <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-8">
@@ -428,7 +505,7 @@ onMounted(() => {
               </p>
             </div>
           </div>
-          <NuxtLink to="/analysis" class="text-sm text-emerald-600 hover:text-emerald-700 flex items-center gap-1">
+          <NuxtLink to="/health/analysis" class="text-sm text-emerald-600 hover:text-emerald-700 flex items-center gap-1">
             查看分析
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
@@ -615,13 +692,17 @@ onMounted(() => {
               <button
                 v-if="activeDay === day.day"
                 @click="regenerateDay(day.day)"
-                :disabled="loading"
-                class="text-sm text-emerald-600 hover:text-emerald-700 flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-emerald-50 transition-colors"
+                :disabled="regeneratingDay === day.day || loading"
+                class="text-sm text-emerald-600 hover:text-emerald-700 flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-emerald-50 transition-colors disabled:opacity-50"
               >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg
+                  class="w-4 h-4"
+                  :class="{ 'animate-spin': regeneratingDay === day.day }"
+                  fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                >
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
-                重新生成
+                {{ regeneratingDay === day.day ? '生成中...' : '重新生成' }}
               </button>
               <span
                 class="px-3 py-1 rounded-full text-sm font-medium"
@@ -648,11 +729,16 @@ onMounted(() => {
                 <button
                   v-if="activeDay === day.day"
                   @click="regenerateMeal(day.day, meal.type)"
-                  :disabled="loading"
-                  class="opacity-0 group-hover:opacity-100 p-1.5 text-emerald-600 hover:bg-emerald-100 rounded-lg transition-all"
-                  title="重新生成此餐"
+                  :disabled="regeneratingMeal === `${day.day}-${meal.type}`"
+                  class="p-1.5 text-emerald-600 hover:bg-emerald-100 rounded-lg transition-all disabled:opacity-50"
+                  :class="regeneratingMeal === `${day.day}-${meal.type}` ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'"
+                  :title="regeneratingMeal === `${day.day}-${meal.type}` ? '生成中...' : '重新生成此餐'"
                 >
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg
+                    class="w-4 h-4"
+                    :class="{ 'animate-spin': regeneratingMeal === `${day.day}-${meal.type}` }"
+                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                  >
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                   </svg>
                 </button>
@@ -711,3 +797,15 @@ onMounted(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.toast-enter-active,
+.toast-leave-active {
+  transition: all 0.3s ease;
+}
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-12px);
+}
+</style>

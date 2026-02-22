@@ -1,0 +1,560 @@
+// Prisma Schema for NutriMind Platform
+// 以食堂为中心的营养健康生态系统
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============ 用户与认证 ============
+
+enum UserRole {
+  PARENT
+  STUDENT
+  SCHOOL_ADMIN
+  CAFETERIA_MANAGER
+  CAFETERIA_COOK
+  DOCTOR
+  INSTITUTION
+  ADMIN
+}
+
+model User {
+  id            String    @id @default(uuid())
+  phone         String    @unique
+  email         String?
+  password      String
+  role          UserRole  @default(PARENT)
+  name          String
+  avatar        String?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // 关联关系
+  student       Student?
+  parentOf      Student[]  @relation("ParentStudent")
+  notifications  Notification[]
+  feedbacks      Feedback[]
+
+  @@index([phone])
+  @@index([role])
+}
+
+// ============ 学校与食堂 ============
+
+enum SchoolType {
+  PRIMARY
+  MIDDLE
+  HIGH
+  UNIVERSITY
+  ENTERPRISE
+  NURSING_HOME
+}
+
+model School {
+  id               String      @id @default(uuid())
+  name             String
+  type             SchoolType
+  address          String?
+  contactPhone     String?
+  contactEmail     String?
+  studentCount     Int         @default(0)
+  nutritionStandard Json?       // 营养标准配置
+  isActive         Boolean     @default(true)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  // 关联关系
+  cafeterias       Cafeteria[]
+  classes          Class[]
+  students         Student[]
+  referrals        Referral[]
+
+  @@index([type])
+}
+
+enum CafeteriaType {
+  STANDARD
+  CUSTOM
+  MIXED
+}
+
+model Cafeteria {
+  id            String          @id @default(uuid())
+  schoolId      String
+  name          String          // 食堂名称
+  type          CafeteriaType   @default(STANDARD)
+  capacity      Int             @default(500)      // 可容纳人数
+  openingHours  Json?           // 营业时间
+  menuType      String          @default("standard") // 供餐类型
+  status        String          @default("active")  // active, inactive
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  // 关联关系
+  school        School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  dishes        Dish[]
+  dailyMenus   DailyMenu[]
+  mealRecords   MealRecord[]
+  feedbacks     Feedback[]
+
+  @@index([schoolId])
+}
+
+enum DishCategory {
+  BREAKFAST
+  STAPLE
+  MEAT
+  VEGETABLE
+  SOUP
+  DESSERT
+  CONDIMENT
+  DRINK
+  SEMI_FINISHED
+}
+
+enum DishDifficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum TasteType {
+  LIGHT
+  SAVORY
+  SPICY
+  SWEET
+  RICH
+}
+
+model Dish {
+  id            String         @id @default(uuid())
+  cafeteriaId   String
+  name          String
+  category      DishCategory
+  difficulty    DishDifficulty @default(EASY)
+  cookingTime   Int            @default(30)  // 分钟
+  portionSize   String         @default("1份")
+  price         Float          @default(0)
+  nutrition     Json           // {calories, protein, carbs, fat, fiber}
+  allergens     String[]       // 过敏原
+  tags          String[]       // 标签: [高蛋白, 补铁]
+  contraindications String[]    // 禁忌: [糖尿病, 痛风]
+  taste         TasteType      @default(SAVORY)
+  suitableFor   String[]       // 适宜人群
+  imageUrl      String?
+  isAvailable   Boolean        @default(true)
+  isSpecial     Boolean        @default(false)  // 特色菜
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  // 关联关系
+  cafeteria     Cafeteria     @relation(fields: [cafeleriaId], references: [id], onDelete: Cascade)
+  menuItems     DailyMenuItem[]
+  mealItems     MealRecordItem[]
+
+  @@index([cafeteriaId])
+  @@index([category])
+  @@index([isAvailable])
+}
+
+enum MenuStatus {
+  DRAFT
+  PUBLISHED
+  ACTIVE
+  COMPLETED
+}
+
+model DailyMenu {
+  id            String        @id @default(uuid())
+  cafeteriaId   String
+  date          DateTime
+  weekDay       Int           // 1-7
+  meals         Json          // {breakfast: [], lunch: [], dinner: []}
+  totalNutrition Json         // 营养汇总
+  status        MenuStatus    @default(DRAFT)
+  approvedBy    String?
+  publishedAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  // 关联关系
+  cafeteria     Cafeteria     @relation(fields: [cafeteriaId], references: [id], onDelete: Cascade)
+  items         DailyMenuItem[]
+
+  @@unique([cafeteriaId, date])
+  @@index([cafeteriaId])
+  @@index([date])
+}
+
+model DailyMenuItem {
+  id          String    @id @default(uuid())
+  menuId      String
+  dishId      String
+  mealType    String    // breakfast, lunch, dinner
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  // 关联关系
+  menu        DailyMenu @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  dish        Dish      @relation(fields: [dishId], references: [id])
+
+  @@index([menuId])
+  @@index([dishId])
+}
+
+// ============ 学生与健康 ============
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+model Student {
+  id            String    @id @default(uuid())
+  userId        String?   @unique  // 学生自己登录
+  schoolId      String
+  classId       String?
+  studentId     String?   // 学号
+  name          String
+  gender        Gender
+  birthDate     DateTime
+  avatar        String?
+
+  // 健康数据
+  height        Float?    // cm
+  weight        Float?    // kg
+  bmi           Float?
+  visionLeft    Float?
+  visionRight   Float?
+  bloodPressureSystolic   Int?
+  bloodPressureDiastolic   Int?
+  heartRate     Int?
+  hemoglobin    Float?
+
+  // 特殊情况
+  allergies     String[]
+  conditions    String[]   // 慢性病
+  specialDietId String?
+
+  status        String    @default("active")  // active, graduated, transferred
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // 关联关系
+  user          User?     @relation(fields: [userId], references: [id])
+  school        School    @relation(fields: [schoolId], references: [id])
+  class         Class?    @relation(fields: [classId], references: [id])
+  healthRecords HealthRecord[]
+  mealRecords   MealRecord[]
+  specialDiets  SpecialDiet[]
+  referrals     Referral[]
+
+  @@index([schoolId])
+  @@index([classId])
+  @@index([studentId])
+}
+
+model Class {
+  id        String    @id @default(uuid())
+  schoolId  String
+  name      String    // 班级名称，如 "一年级一班"
+  grade     String?   // 年级
+  createdAt DateTime  @default(now())
+
+  // 关联关系
+  school    School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  students  Student[]
+
+  @@unique([schoolId, name])
+  @@index([schoolId])
+}
+
+model HealthRecord {
+  id            String    @id @default(uuid())
+  studentId     String
+  checkupDate   DateTime
+  schoolYear    String?   // 学年
+
+  // 基础数据
+  height        Float
+  weight        Float
+  bmi           Float
+
+  // 视力
+  visionLeft    Float
+  visionRight   Float
+
+  // 血压
+  bloodPressureSystolic   Int?
+  bloodPressureDiastolic   Int?
+
+  // 血常规
+  hemoglobin    Float?
+  fastingGlucose Float?
+
+  // 详细数据
+  rawData       Json?     // OCR原始数据
+  aiAnalysis    String?   // AI分析结果
+  reportUrl     String?    // 体检报告文件URL
+  createdAt     DateTime  @default(now())
+
+  // 关联关系
+  student       Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+  @@index([checkupDate])
+}
+
+enum SpecialDietType {
+  ALLERGY
+  MEDICAL
+  RELIGIOUS
+  PREFERENCE
+}
+
+enum SeverityLevel {
+  WARNING
+  PROHIBIT
+  AVOID
+}
+
+enum SpecialDietStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+model SpecialDiet {
+  id          String          @id @default(uuid())
+  studentId   String
+  type        SpecialDietType
+  detail      String          // 详细说明
+  severity    SeverityLevel
+  startDate   DateTime
+  endDate     DateTime?
+  reason      String?
+  approvedBy  String?
+  status      SpecialDietStatus @default(ACTIVE)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  // 关联关系
+  student     Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+  @@index([status])
+}
+
+// ============ 用餐记录 ============
+
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+  SNACK
+}
+
+model MealRecord {
+  id              String          @id @default(uuid())
+  studentId       String
+  cafeteriaId     String
+  date            DateTime
+  mealType        MealType
+
+  // 记录内容
+  totalCalories   Float?
+  totalProtein    Float?
+  totalCarbs     Float?
+  totalFat       Float?
+
+  feedback        Json?           // {rating, comment}
+  createdAt       DateTime        @default(now())
+
+  // 关联关系
+  student         Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  cafeteria       Cafeteria       @relation(fields: [cafeteriaId], references: [id])
+  items           MealRecordItem[]
+
+  @@unique([studentId, cafeteriaId, date, mealType])
+  @@index([studentId])
+  @@index([cafeteriaId])
+  @@index([date])
+}
+
+model MealRecordItem {
+  id            String      @id @default(uuid())
+  recordId      String
+  dishId        String
+  portion       Float       @default(1)  // 份数
+  calories      Float?
+  createdAt     DateTime    @default(now())
+
+  // 关联关系
+  record        MealRecord  @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  dish          Dish        @relation(fields: [dishId], references: [id])
+
+  @@index([recordId])
+  @@index([dishId])
+}
+
+// ============ 转诊与处方 ============
+
+enum ReferralStatus {
+  PENDING
+  ACCEPTED
+  COMPLETED
+  CANCELLED
+}
+
+model Referral {
+  id            String          @id @default(uuid())
+  studentId     String
+  fromSchoolId  String
+  toHospitalId  String?         // 医院ID
+  reason        String          // 转诊原因
+  healthSummary Json            // 健康数据摘要
+  status        ReferralStatus  @default(PENDING)
+  hospitalNote  String?         // 医院备注
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  // 关联关系
+  student       Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  fromSchool    School         @relation(fields: [fromSchoolId], references: [id])
+  prescriptions Prescription[]
+
+  @@index([studentId])
+  @@index([status])
+}
+
+enum PrescriptionType {
+  DIABETIC
+  LOW_SODIUM
+  LOW_PURINE
+  LOW_FAT
+  SOFT_FOOD
+  GENERAL
+}
+
+model Prescription {
+  id              String           @id @default(uuid())
+  referralId      String
+  condition       String           // 疾病名称
+  dietType        PrescriptionType
+  targetCalories  Int?
+  targetProtein   Float?
+  targetCarbs     Float?
+  targetFat       Float?
+  targetSodium    Float?
+  notes           String           // 饮食建议
+  isActive        Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  // 关联关系
+  referral        Referral         @relation(fields: [referralId], references: [id], onDelete: Cascade)
+
+  @@index([referralId])
+}
+
+// ============ 通知 ============
+
+enum NotificationType {
+  HEALTH_ALERT
+  MEAL_REMINDER
+  MENU_UPDATE
+  REFERRAL
+  SYSTEM
+}
+
+enum NotificationChannel {
+  APP
+  SMS
+  WECHAT
+  EMAIL
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  READ
+  FAILED
+}
+
+model Notification {
+  id          String              @id @default(uuid())
+  userId      String
+  type        NotificationType
+  title       String
+  content     String
+  channel     NotificationChannel @default(APP)
+  status      NotificationStatus  @default(PENDING)
+  sentAt      DateTime?
+  readAt      DateTime?
+  metadata    Json?
+  createdAt   DateTime           @default(now())
+
+  // 关联关系
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([type])
+}
+
+// ============ 反馈 ============
+
+enum FeedbackType {
+  DISH_RATING
+  MENU_SUGGESTION
+  GENERAL
+}
+
+model Feedback {
+  id          String        @id @default(uuid())
+  userId      String
+  cafeteriaId String?
+  type        FeedbackType
+  content     String
+  rating      Int?         // 1-5
+  isResolved  Boolean       @default(false)
+  createdAt   DateTime      @default(now())
+
+  // 关联关系
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cafeteria   Cafeteria?    @relation(fields: [cafeteriaId], references: [id])
+
+  @@index([userId])
+  @@index([cafeteriaId])
+}
+
+// ============ 知识库 (RAG) ============
+
+model KnowledgeChunk {
+  id          String    @id @default(uuid())
+  category    String    // nutrition, diet_therapy, disease, recipe
+  title       String
+  content     String
+  tags        String[]
+  embedding   String?   // 向量存储 (JSON string)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([category])
+}
+
+// ============ 系统配置 ============
+
+model SystemConfig {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

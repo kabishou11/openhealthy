@@ -10,7 +10,7 @@
  */
 
 import { FastifyInstance } from 'fastify';
-import { nutriMindWorkflow, NutriMindWorkflow, ConversationMessage, UserProfile, getLLM, createMockLLM } from '../agents/langgraph-workflow.js';
+import { nutriMindWorkflow, NutriMindWorkflow, ConversationMessage, UserProfile, getLLM, createMockLLM, setSelectedModel } from '../agents/langgraph-workflow.js';
 import { userHealthMCP } from '../mcp_tools/user-health.js';
 
 // Type for the user profile from user-health MCP
@@ -61,8 +61,9 @@ export async function chatRoutes(fastify: FastifyInstance) {
       return { error: 'Message is required' };
     }
 
-    // Log model selection
+    // Log model selection and apply it
     console.log(`[Chat] Using model: ${model || 'default'}`);
+    if (model) setSelectedModel(model);
 
     // Generate session ID if not provided
     const finalSessionId = sessionId || `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;

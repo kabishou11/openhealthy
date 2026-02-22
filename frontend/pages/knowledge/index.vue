@@ -20,9 +20,17 @@ const categories = [
 
 // Default models (will be fetched from backend)
 const defaultModels = [
-  { id: 'moonshotai/Kimi-K2.5', name: 'Kimi K2.5', provider: 'ModelScope', contextLength: '128K' },
-  { id: 'Qwen/Qwen3-8B', name: 'Qwen3-8B', provider: 'ModelScope', contextLength: '32K' },
-  { id: 'Qwen/Qwen2.5-72B-Instruct', name: 'Qwen2.5-72B', provider: 'ModelScope', contextLength: '128K' },
+  { id: 'Qwen/Qwen3-235B-A22B', name: 'Qwen3-235B-A22B (MoE)', provider: 'Qwen', contextLength: '128K' },
+  { id: 'Qwen/Qwen3-32B', name: 'Qwen3-32B', provider: 'Qwen', contextLength: '128K' },
+  { id: 'Qwen/Qwen3-14B', name: 'Qwen3-14B', provider: 'Qwen', contextLength: '128K' },
+  { id: 'Qwen/Qwen3-8B', name: 'Qwen3-8B', provider: 'Qwen', contextLength: '128K' },
+  { id: 'Qwen/Qwen2.5-72B-Instruct', name: 'Qwen2.5-72B', provider: 'Qwen', contextLength: '128K' },
+  { id: 'deepseek-ai/DeepSeek-V3', name: 'DeepSeek-V3', provider: 'DeepSeek', contextLength: '128K' },
+  { id: 'deepseek-ai/DeepSeek-R1', name: 'DeepSeek-R1', provider: 'DeepSeek', contextLength: '128K' },
+  { id: 'deepseek-ai/DeepSeek-R1-Distill-Qwen-32B', name: 'DeepSeek-R1-Qwen-32B', provider: 'DeepSeek', contextLength: '128K' },
+  { id: 'moonshotai/Kimi-K2.5', name: 'Kimi K2.5', provider: 'Moonshot', contextLength: '128K' },
+  { id: 'meta-llama/Llama-3.1-70B-Instruct', name: 'Llama-3.1-70B', provider: 'Meta', contextLength: '128K' },
+  { id: 'THUDM/GLM-4-9b-chat', name: 'GLM-4-9B', provider: 'ZhipuAI', contextLength: '128K' },
   { id: '01-ai/Yi-1.5-34B-Chat', name: 'Yi-1.5-34B', provider: '01.AI', contextLength: '32K' },
 ]
 
@@ -30,10 +38,13 @@ const models = ref(defaultModels)
 const selectedModel = ref(defaultModels[0].id)
 const isModelsLoading = ref(false)
 const modelsError = ref<string | null>(null)
+const tokenConfigured = ref(false)
 const selectedCategory = ref<string | null>(null)
 const newMessage = ref('')
 const isLoading = ref(false)
 const chatContainer = ref<HTMLElement | null>(null)
+// 保持会话 ID，确保多轮对话上下文连续
+const sessionId = ref(`session-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`)
 
 interface Message {
   id: string
@@ -68,6 +79,7 @@ const fetchModels = async () => {
         models.value = data.llm
         selectedModel.value = models.value[0].id
       }
+      tokenConfigured.value = data.tokenConfigured === true
     }
     else {
       modelsError.value = '获取模型列表失败，使用默认模型'
@@ -124,7 +136,7 @@ const sendMessage = async () => {
         body: JSON.stringify({
           message: userMessage,
           model: selectedModel.value,
-          history: messages.value.slice(-6).map(m => ({ role: m.role, content: m.content })),
+          sessionId: sessionId.value,
         }),
       })
 
@@ -254,6 +266,15 @@ onMounted(() => {
         <NuxtLink to="/knowledge/models" class="text-xs text-emerald-600 hover:text-emerald-700">
           配置模型 →
         </NuxtLink>
+      </div>
+
+      <!-- Token 未配置提示 -->
+      <div v-if="!tokenConfigured && !isModelsLoading" class="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-2">
+        <svg class="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+        <span class="text-xs text-amber-700">演示模式：在 <code class="bg-amber-100 px-1 rounded">backend/.env</code> 中设置 <code class="bg-amber-100 px-1 rounded">MODELSCOPE_TOKEN</code> 可获得真实 AI 回复</span>
+        <NuxtLink to="/knowledge/models" class="ml-auto text-xs text-amber-600 hover:text-amber-700 underline flex-shrink-0">去配置</NuxtLink>
       </div>
 
       <!-- 对话区域 -->

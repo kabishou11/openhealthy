@@ -185,6 +185,7 @@ declare global {
   const useAsyncQueue: typeof import('@vueuse/core').useAsyncQueue
   const useAsyncState: typeof import('@vueuse/core').useAsyncState
   const useAttrs: typeof import('vue').useAttrs
+  const useAuthStore: typeof import('../../stores/auth').useAuthStore
   const useAverage: typeof import('../../../node_modules/@vueuse/math').useAverage
   const useBase64: typeof import('@vueuse/core').useBase64
   const useBattery: typeof import('@vueuse/core').useBattery
@@ -211,6 +212,7 @@ declare global {
   const useCurrentElement: typeof import('@vueuse/core').useCurrentElement
   const useCycleList: typeof import('@vueuse/core').useCycleList
   const useDark: typeof import('@vueuse/core').useDark
+  const useDashboardAPI: typeof import('../../composables/useDashboard').useDashboardAPI
   const useDateFormat: typeof import('@vueuse/core').useDateFormat
   const useDebounce: typeof import('@vueuse/core').useDebounce
   const useDebounceFn: typeof import('@vueuse/core').useDebounceFn
@@ -249,6 +251,7 @@ declare global {
   const useGeolocation: typeof import('@vueuse/core').useGeolocation
   const useHead: typeof import('../../../node_modules/nuxt/dist/app/composables/head').useHead
   const useHeadSafe: typeof import('../../../node_modules/nuxt/dist/app/composables/head').useHeadSafe
+  const useHealthAPI: typeof import('../../composables/useHealth').useHealthAPI
   const useHydration: typeof import('../../../node_modules/nuxt/dist/app/composables/hydrate').useHydration
   const useId: typeof import('vue').useId
   const useIdle: typeof import('@vueuse/core').useIdle
@@ -273,10 +276,12 @@ declare global {
   const useMediaQuery: typeof import('@vueuse/core').useMediaQuery
   const useMemoize: typeof import('@vueuse/core').useMemoize
   const useMemory: typeof import('@vueuse/core').useMemory
+  const useMenusAPI: typeof import('../../composables/useMenus').useMenusAPI
   const useMin: typeof import('../../../node_modules/@vueuse/math').useMin
   const useModal: typeof import('../../../node_modules/@nuxt/ui/dist/runtime/composables/useModal').useModal
   const useModel: typeof import('vue').useModel
   const useModelScope: typeof import('../../composables/useModelScope').useModelScope
+  const useModelsAPI: typeof import('../../composables/useModels').useModelsAPI
   const useMounted: typeof import('@vueuse/core').useMounted
   const useMouse: typeof import('@vueuse/core').useMouse
   const useMouseInElement: typeof import('@vueuse/core').useMouseInElement
@@ -288,6 +293,7 @@ declare global {
   const useNuxtApp: typeof import('../../../node_modules/nuxt/dist/app/nuxt').useNuxtApp
   const useNuxtData: typeof import('../../../node_modules/nuxt/dist/app/composables/asyncData').useNuxtData
   const useNuxtDevTools: typeof import('../../node_modules/@nuxt/devtools/dist/runtime/use-nuxt-devtools').useNuxtDevTools
+  const useOCR: typeof import('../../composables/useOCR').useOCR
   const useObjectUrl: typeof import('@vueuse/core').useObjectUrl
   const useOffsetPagination: typeof import('@vueuse/core').useOffsetPagination
   const useOnline: typeof import('@vueuse/core').useOnline
@@ -328,6 +334,7 @@ declare global {
   const useRouter: typeof import('../../../node_modules/nuxt/dist/app/composables/router').useRouter
   const useRuntimeConfig: typeof import('../../../node_modules/nuxt/dist/app/nuxt').useRuntimeConfig
   const useRuntimeHook: typeof import('../../../node_modules/nuxt/dist/app/composables/runtime-hook').useRuntimeHook
+  const useSchoolsAPI: typeof import('../../composables/useSchools').useSchoolsAPI
   const useScreenOrientation: typeof import('@vueuse/core').useScreenOrientation
   const useScreenSafeArea: typeof import('@vueuse/core').useScreenSafeArea
   const useScript: typeof import('../../../node_modules/nuxt/dist/app/composables/script-stubs').useScript
@@ -380,6 +387,7 @@ declare global {
   const useState: typeof import('../../../node_modules/nuxt/dist/app/composables/state').useState
   const useStepper: typeof import('@vueuse/core').useStepper
   const useStorageAsync: typeof import('@vueuse/core').useStorageAsync
+  const useStudentsAPI: typeof import('../../composables/useStudents').useStudentsAPI
   const useStyleTag: typeof import('@vueuse/core').useStyleTag
   const useSum: typeof import('../../../node_modules/@vueuse/math').useSum
   const useSupported: typeof import('@vueuse/core').useSupported
@@ -454,6 +462,12 @@ declare global {
   // @ts-ignore
   export type { ModelScopeConfig, ChatMessage, ChatCompletionParams, ChatCompletionResponse, EmbeddingParams, EmbeddingResponse } from '../../composables/useModelScope'
   import('../../composables/useModelScope')
+  // @ts-ignore
+  export type { ModelInfo } from '../../composables/useModels'
+  import('../../composables/useModels')
+  // @ts-ignore
+  export type { OCRStatus, HealthCheckupData, OCRResult } from '../../composables/useOCR'
+  import('../../composables/useOCR')
   // @ts-ignore
   export type { RAGConfig, RAGQuery, RAGSource, RAGResponse } from '../../composables/useRAG'
   import('../../composables/useRAG')
@@ -649,6 +663,7 @@ declare module 'vue' {
     readonly useAsyncQueue: UnwrapRef<typeof import('@vueuse/core')['useAsyncQueue']>
     readonly useAsyncState: UnwrapRef<typeof import('@vueuse/core')['useAsyncState']>
     readonly useAttrs: UnwrapRef<typeof import('vue')['useAttrs']>
+    readonly useAuthStore: UnwrapRef<typeof import('../../stores/auth')['useAuthStore']>
     readonly useAverage: UnwrapRef<typeof import('../../../node_modules/@vueuse/math')['useAverage']>
     readonly useBase64: UnwrapRef<typeof import('@vueuse/core')['useBase64']>
     readonly useBattery: UnwrapRef<typeof import('@vueuse/core')['useBattery']>
@@ -675,6 +690,7 @@ declare module 'vue' {
     readonly useCurrentElement: UnwrapRef<typeof import('@vueuse/core')['useCurrentElement']>
     readonly useCycleList: UnwrapRef<typeof import('@vueuse/core')['useCycleList']>
     readonly useDark: UnwrapRef<typeof import('@vueuse/core')['useDark']>
+    readonly useDashboardAPI: UnwrapRef<typeof import('../../composables/useDashboard')['useDashboardAPI']>
     readonly useDateFormat: UnwrapRef<typeof import('@vueuse/core')['useDateFormat']>
     readonly useDebounce: UnwrapRef<typeof import('@vueuse/core')['useDebounce']>
     readonly useDebounceFn: UnwrapRef<typeof import('@vueuse/core')['useDebounceFn']>
@@ -713,6 +729,7 @@ declare module 'vue' {
     readonly useGeolocation: UnwrapRef<typeof import('@vueuse/core')['useGeolocation']>
     readonly useHead: UnwrapRef<typeof import('../../../node_modules/nuxt/dist/app/composables/head')['useHead']>
     readonly useHeadSafe: UnwrapRef<typeof import('../../../node_modules/nuxt/dist/app/composables/head')['useHeadSafe']>
+    readonly useHealthAPI: UnwrapRef<typeof import('../../composables/useHealth')['useHealthAPI']>
     readonly useHydration: UnwrapRef<typeof import('../../../node_modules/nuxt/dist/app/composables/hydrate')['useHydration']>
     readonly useId: UnwrapRef<typeof import('vue')['useId']>
     readonly useIdle: UnwrapRef<typeof import('@vueuse/core')['useIdle']>
@@ -737,10 +754,12 @@ declare module 'vue' {
     readonly useMediaQuery: UnwrapRef<typeof import('@vueuse/core')['useMediaQuery']>
     readonly useMemoize: UnwrapRef<typeof import('@vueuse/core')['useMemoize']>
     readonly useMemory: UnwrapRef<typeof import('@vueuse/core')['useMemory']>
+    readonly useMenusAPI: UnwrapRef<typeof import('../../composables/useMenus')['useMenusAPI']>
     readonly useMin: UnwrapRef<typeof import('../../../node_modules/@vueuse/math')['useMin']>
     readonly useModal: UnwrapRef<typeof import('../../../node_modules/@nuxt/ui/dist/runtime/composables/useModal')['useModal']>
     readonly useModel: UnwrapRef<typeof import('vue')['useModel']>
     readonly useModelScope: UnwrapRef<typeof import('../../composables/useModelScope')['useModelScope']>
+    readonly useModelsAPI: UnwrapRef<typeof import('../../composables/useModels')['useModelsAPI']>
     readonly useMounted: UnwrapRef<typeof import('@vueuse/core')['useMounted']>
     readonly useMouse: UnwrapRef<typeof import('@vueuse/core')['useMouse']>
     readonly useMouseInElement: UnwrapRef<typeof import('@vueuse/core')['useMouseInElement']>
@@ -752,6 +771,7 @@ declare module 'vue' {
     readonly useNuxtApp: UnwrapRef<typeof import('../../../node_modules/nuxt/dist/app/nuxt')['useNuxtApp']>
     readonly useNuxtData: UnwrapRef<typeof import('../../../node_modules/nuxt/dist/app/composables/asyncData')['useNuxtData']>
     readonly useNuxtDevTools: UnwrapRef<typeof import('../../node_modules/@nuxt/devtools/dist/runtime/use-nuxt-devtools')['useNuxtDevTools']>
+    readonly useOCR: UnwrapRef<typeof import('../../composables/useOCR')['useOCR']>
     readonly useObjectUrl: UnwrapRef<typeof import('@vueuse/core')['useObjectUrl']>
     readonly useOffsetPagination: UnwrapRef<typeof import('@vueuse/core')['useOffsetPagination']>
     readonly useOnline: UnwrapRef<typeof import('@vueuse/core')['useOnline']>
@@ -792,6 +812,7 @@ declare module 'vue' {
     readonly useRouter: UnwrapRef<typeof import('../../../node_modules/nuxt/dist/app/composables/router')['useRouter']>
     readonly useRuntimeConfig: UnwrapRef<typeof import('../../../node_modules/nuxt/dist/app/nuxt')['useRuntimeConfig']>
     readonly useRuntimeHook: UnwrapRef<typeof import('../../../node_modules/nuxt/dist/app/composables/runtime-hook')['useRuntimeHook']>
+    readonly useSchoolsAPI: UnwrapRef<typeof import('../../composables/useSchools')['useSchoolsAPI']>
     readonly useScreenOrientation: UnwrapRef<typeof import('@vueuse/core')['useScreenOrientation']>
     readonly useScreenSafeArea: UnwrapRef<typeof import('@vueuse/core')['useScreenSafeArea']>
     readonly useScript: UnwrapRef<typeof import('../../../node_modules/nuxt/dist/app/composables/script-stubs')['useScript']>
@@ -844,6 +865,7 @@ declare module 'vue' {
     readonly useState: UnwrapRef<typeof import('../../../node_modules/nuxt/dist/app/composables/state')['useState']>
     readonly useStepper: UnwrapRef<typeof import('@vueuse/core')['useStepper']>
     readonly useStorageAsync: UnwrapRef<typeof import('@vueuse/core')['useStorageAsync']>
+    readonly useStudentsAPI: UnwrapRef<typeof import('../../composables/useStudents')['useStudentsAPI']>
     readonly useStyleTag: UnwrapRef<typeof import('@vueuse/core')['useStyleTag']>
     readonly useSum: UnwrapRef<typeof import('../../../node_modules/@vueuse/math')['useSum']>
     readonly useSupported: UnwrapRef<typeof import('@vueuse/core')['useSupported']>

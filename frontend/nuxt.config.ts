@@ -64,11 +64,16 @@ export default defineNuxtConfig({
     storesDirs: ['./stores/**'],
   },
 
-  vite: {
-    server: {
-      port: 3000,
-      host: true,
+  nitro: {
+    devProxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
     },
+  },
+
+  vite: {
     css: {
       preprocessorOptions: {
         scss: {
