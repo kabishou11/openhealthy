@@ -18,7 +18,7 @@ const envSchema = z.object({
 
   // OpenAI API (备选/兼容)
   OPENAI_API_KEY: z.string().optional(),
-  OPENAI_MODEL: z.string().default('Qwen/Qwen2.5-72B-Instruct'),
+  OPENAI_MODEL: z.string().default('Qwen/Qwen3-8B'),
   OPENAI_API_BASE: z.string().default('https://api-inference.modelscope.cn/v1'),
 
   // ============================================
@@ -65,6 +65,15 @@ export const config = {
   port: parseInt(process.env.PORT || '3001'),
 
   // ============================================
+  // JWT Authentication
+  // ============================================
+  jwt: {
+    secret: process.env.JWT_SECRET || 'nutrimind-secret-key-change-in-production',
+    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
+    refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
+  },
+
+  // ============================================
   // LLM API - ModelScope (推荐)
   // ============================================
   modelScopeApiUrl: process.env.MODELSCOPE_API_URL || 'https://api-inference.modelscope.cn/v1',
@@ -72,7 +81,7 @@ export const config = {
 
   // OpenAI (兼容)
   openaiApiKey: process.env.OPENAI_API_KEY || '',
-  openaiModel: process.env.OPENAI_MODEL || 'Qwen/Qwen2.5-72B-Instruct',
+  openaiModel: process.env.OPENAI_MODEL || 'Qwen/Qwen3-8B',
   openaiApiBase: process.env.OPENAI_API_BASE || 'https://api-inference.modelscope.cn/v1',
 
   // ============================================
@@ -84,7 +93,7 @@ export const config = {
   baiduOcrSecretKey: process.env.BAIDU_OCR_SECRET_KEY || '',
 
   // Database
-  databaseUrl: process.env.DATABASE_URL || 'postgresql://localhost:5432/nutrimind',
+  databaseUrl: process.env.DATABASE_URL || './data/nutrimind.db',
   redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
 
   // Neo4j
@@ -93,7 +102,7 @@ export const config = {
   neo4jPassword: process.env.NEO4J_PASSWORD || 'neo4j',
 
   // CORS
-  corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:3000').split(','),
+  corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:3000,http://localhost:1420').split(','),
 
   // Rate Limiting
   rateLimitMax: parseInt(process.env.RATE_LIMIT_MAX || '100'),
@@ -117,6 +126,9 @@ export const config = {
   // Paths
   kbPath: process.env.KB_PATH || './kb',
   recipesPath: process.env.RECIPES_PATH || './kb/recipes',
+
+  // OCR Service URL
+  ocrUrl: process.env.OCR_URL || 'http://localhost:8081',
 };
 
 export type Config = typeof config;

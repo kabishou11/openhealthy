@@ -156,7 +156,7 @@ function getDefaultConfig(): LangGraphConfig {
   return {
     modelScopeApiKey: process.env.MODELSCOPE_TOKEN || process.env.OPENAI_API_KEY || '',
     modelScopeApiBase: process.env.MODELSCOPE_API_URL || 'https://api-inference.modelscope.cn/v1',
-    model: process.env.OPENAI_MODEL || 'Qwen/Qwen2.5-72B-Instruct',  // Default to Qwen2.5-72B (faster)
+    model: process.env.OPENAI_MODEL || 'Qwen/Qwen3-8B',  // Default to Qwen3-8B
     temperature: 0.1,
     maxTokens: 2000,
     sessionTtl: 86400,
@@ -167,11 +167,18 @@ function getDefaultConfig(): LangGraphConfig {
 
 let llmInstance: ChatOpenAI | null = null;
 
+// Currently selected model (set per request from frontend)
+let selectedModel = process.env.OPENAI_MODEL || 'Qwen/Qwen3-8B';
+
+export function setSelectedModel(model: string) {
+  selectedModel = model;
+}
+
 // Direct API call helper for ModelScope (bypasses LangChain issues)
 async function callModelScopeAPI(messages: { role: string; content: string }[], maxTokens: number = 500): Promise<string> {
   const apiKey = process.env.MODELSCOPE_TOKEN || process.env.OPENAI_API_KEY || '';
   const apiBase = process.env.MODELSCOPE_API_URL || 'https://api-inference.modelscope.cn/v1';
-  const model = process.env.OPENAI_MODEL || 'Qwen/Qwen2.5-72B-Instruct';
+  const model = selectedModel;
 
   if (!apiKey) {
     throw new Error('API key not configured');
@@ -630,10 +637,21 @@ export async function classifyIntentNode(
     };
   } catch (error) {
     console.error('Intent classification failed:', error);
-    // Don't set workflowStage to 'error' - instead use health_chat as fallback
+    // Keyword-based fallback classification
+    const lowerMsg = lastMessage.toLowerCase();
+    let fallbackIntent: IntentType = 'health_chat';
+    if (/糖尿病|血糖|高血压|高血脂|脂肪肝|痛风|肥胖|高尿酸/.test(lowerMsg)) {
+      fallbackIntent = 'diet_therapy';
+    } else if (/bmi|体重|热量|卡路里|代谢|蛋白质|碳水|脂肪|营养/.test(lowerMsg)) {
+      fallbackIntent = 'nutrition_analysis';
+    } else if (/食谱|怎么做|推荐菜/.test(lowerMsg)) {
+      fallbackIntent = 'recipe_search';
+    } else if (/一周菜单|一周食谱|生成菜单|菜单规划|健康菜单/.test(lowerMsg)) {
+      fallbackIntent = 'menu_planning';
+    }
     return {
-      currentIntent: 'health_chat',
-      currentTask: 'health_chat',
+      currentIntent: fallbackIntent,
+      currentTask: fallbackIntent,
       contextRequirements: [],
       workflowStage: 'classifying',
     };
@@ -875,10 +893,20 @@ ${profile ? `用户信息: ${profile.name}, ${profile.age}岁, 健康状况: ${p
     };
   } catch (error: any) {
     console.error('Diet therapy execution failed:', error.message);
-    return {
-      type: 'diet_therapy',
-      result: '中医食疗建议：\n\n1. 饮食有节，定时定量\n2. 五谷为养，五果为助\n3. 顺应四时，春生夏长\n4. 体质调理因人而异\n\n建议咨询专业中医师获取个性化方案。',
-    };
+    const lower = message.toLowerCase();
+    let fallback = '';
+    if (/糖尿病|血糖/.test(lower)) {
+      fallback = '**糖尿病食疗建议**\n\n体质分析：多为阴虚燥热型\n\n推荐食物：\n- 苦瓜（降血糖）\n- 山药（健脾益气）\n- 南瓜（低GI）\n- 黑木耳（改善胰岛素敏感性）\n\n避免：甜食、精制碳水、油炸食品';
+    } else if (/高血压/.test(lower)) {
+      fallback = '**高血压食疗建议**\n\n推荐食物：\n- 芹菜（降压）\n- 荷叶茶（清热利湿）\n- 菊花茶（平肝明目）\n- 黑木耳（活血化瘀）\n\n避免：高盐、高脂、辛辣食物';
+    } else if (/脂肪肝/.test(lower)) {
+      fallback = '**脂肪肝食疗建议**\n\n推荐食物：\n- 绿茶（抗氧化）\n- 山楂（消食化积）\n- 薏米（利湿健脾）\n- 冬瓜（利水消肿）\n\n避免：酒精、高脂食物、甜食';
+    } else if (/痛风/.test(lower)) {
+      fallback = '**痛风食疗建议**\n\n推荐食物：\n- 樱桃（降尿酸）\n- 苏打水（碱化尿液）\n- 低脂奶（促进尿酸排泄）\n\n禁忌：动物内脏、海鲜、啤酒、豆类';
+    } else {
+      fallback = '**中医食疗建议**\n\n1. 饮食有节，定时定量\n2. 五谷为养，五果为助\n3. 顺应四时，春生夏长秋收冬藏\n4. 体质调理因人而异\n\n建议咨询专业中医师获取个性化方案。';
+    }
+    return { type: 'diet_therapy', result: fallback };
   }
 }
 
@@ -978,10 +1006,25 @@ ${profile ? `\n当前用户: ${profile.name}, ${profile.age}岁` : ''}
       result,
     };
   } catch {
-    return {
-      type: 'health_chat',
-      result: '您好！我是 NutriMind 智能营养师助手。请问有什么关于营养健康的问题我可以帮助您？',
-    };
+    const lastUserMsg = messages.filter(m => m.role === 'user').pop()?.content || '';
+    const lower = lastUserMsg.toLowerCase();
+    let fallback = '';
+    if (/糖尿病|血糖/.test(lower)) {
+      fallback = '**糖尿病饮食建议**\n\n1. 控制总热量，选择低GI食物（糙米、燕麦）\n2. 均衡营养：碳水45-60%，蛋白质15-20%\n3. 定时定量，少食多餐\n\n禁忌：白米、白面包、糖果、甜饮料';
+    } else if (/高血压/.test(lower)) {
+      fallback = '**高血压饮食建议**\n\n1. 低盐饮食：每日盐<5g\n2. 多吃富含钾的蔬果（香蕉、橙子）\n3. 控制脂肪，限酒\n\n注意：遵医嘱服药，定期监测血压';
+    } else if (/减脂|减肥/.test(lower)) {
+      fallback = '**减脂饮食建议**\n\n1. 控制热量：比日常低300-500kcal\n2. 高蛋白：每餐25-30g蛋白质\n3. 低GI主食：糙米、燕麦、红薯\n4. 多喝水，少食多餐';
+    } else if (/脂肪肝/.test(lower)) {
+      fallback = '**脂肪肝饮食建议**\n\n1. 控制总热量，减少脂肪摄入\n2. 增加膳食纤维，限制糖分\n3. 戒酒，适当运动\n\n推荐：燕麦、绿叶蔬菜、豆类、鱼类';
+    } else if (/痛风/.test(lower)) {
+      fallback = '**痛风饮食建议**\n\n1. 限制高嘌呤食物\n2. 多喝水（每日>2000ml）\n3. 避免饮酒\n\n禁忌：动物内脏、海鲜、啤酒';
+    } else if (/你好|hello|hi/.test(lower)) {
+      fallback = '您好！我是 NutriMind 智能营养师助手。请问有什么营养健康问题我可以帮您解答？';
+    } else {
+      fallback = `关于"${lastUserMsg}"，建议：\n\n- 保持均衡饮食，多吃蔬菜水果\n- 适量优质蛋白，控制精制糖\n- 规律作息，适当运动\n\n如需更精准的建议，请提供更多健康信息。`;
+    }
+    return { type: 'health_chat', result: fallback };
   }
 }
 
@@ -1026,7 +1069,7 @@ export async function synthesizeResponseNode(
         const p = result.profile;
         finalResponse = `📊 营养分析报告
 
-您好${p.profile.name || ''}，根据您提供的信息：
+您好${p.name || ''}，根据您提供的信息：
 
 📈 身体指标
 - BMI: ${p.bmi} (${p.bmiStatus})
