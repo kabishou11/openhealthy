@@ -10,6 +10,7 @@
 - 📊 **营养分析** - 计算食物营养成分，分析摄入情况
 - 👨‍🏫 **学校管理模块** - 学生健康档案、体检数据管理
 - 🔐 **用户认证系统** - 登录/注册、角色权限管理
+- 📷 **OCR 体检报告扫描** - 自动识别体检报告数据
 
 ## 项目进展
 
@@ -31,10 +32,10 @@
 | 管理后台 | ✅ |
 | 学生管理 | ✅ |
 | 健康记录管理 | ✅ |
+| OCR 体检报告扫描 | ✅ |
 
 ### 🚧 开发中
 
-- [ ] OCR 体检报告扫描 (需 GLM-OCR 模型)
 - [ ] 实时语音对话
 - [ ] 微信/短信家长通知
 
@@ -331,6 +332,28 @@ CORS_ORIGINS=http://localhost:3000,http://localhost:1420
 3. 创建新 Token
 4. 复制 Token 到 `.env` 文件
 
+### OCR 模型 (可选)
+
+项目已包含 OCR 服务代码，需要下载 GLM-OCR 模型才能使用：
+
+```bash
+# 克隆模型 (约 2.5GB)
+git lfs install
+git clone https://huggingface.co/zai-org/GLM-OCR models/GLM-OCR
+
+# 或者使用 ModelScope
+modelscope download --model ZhipuAI/glm-ocr --local_dir ./models/GLM-OCR
+```
+
+模型文件已包含在项目中 (`models/GLM-OCR/`)，如需重新下载可执行上述命令。
+
+启动 OCR 服务：
+```bash
+cd backend
+source .ocr-venv/bin/activate  # 或 activate.bat (Windows)
+python src/ocr/glm-ocr-service.py --port 8081
+```
+
 ---
 
 ## API 文档
@@ -370,6 +393,16 @@ GET    /api/v1/menu/random-meal?type=午餐     # 单餐重新生成
 ```http
 GET  /api/v1/nutrition/foods        # 搜索食物
 POST /api/v1/nutrition/calculate     # 计算营养
+```
+
+### OCR (需要 GLM-OCR 模型)
+
+```http
+GET  /api/v1/ocr/status             # OCR 状态
+POST /api/v1/ocr/load               # 加载模型
+POST /api/v1/ocr/unload             # 卸载模型
+POST /api/v1/ocr                    # 执行 OCR
+POST /api/v1/ocr/health-checkup     # 提取体检数据
 ```
 
 ---
