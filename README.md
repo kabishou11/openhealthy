@@ -2,16 +2,59 @@
 
 > 一个能替代营养师的AI系统，渗透到学校、医院、企业等机构
 
+## 功能特点
+
+- 🤖 **AI 智能对话** - 基于大模型的营养健康咨询
+- 📋 **个性化餐单规划** - 根据用户身体数据生成7天餐单
+- 🍳 **140+ 道食谱库** - 涵盖早餐、主食、荤菜、素菜、水产、汤、凉菜、甜品
+- 📊 **营养分析** - 计算食物营养成分，分析摄入情况
+- 👨‍🏫 **学校管理模块** - 学生健康档案、体检数据管理
+- 🔐 **用户认证系统** - 登录/注册、角色权限管理
+
+## 项目进展
+
+### ✅ 已完成
+
+| 功能 | 状态 |
+|------|------|
+| Fastify API 基础框架 | ✅ |
+| LangChain/LangGraph AI Agents | ✅ |
+| ModelScope API 集成 (Qwen3-8B) | ✅ |
+| 食谱数据库 (140道菜) | ✅ |
+| 营养数据库 (60+食物) | ✅ |
+| 用户健康档案管理 | ✅ |
+| 智能对话 (WebSocket) | ✅ |
+| 餐单生成 (LLM + 食谱库fallback) | ✅ |
+| 单餐重新生成 | ✅ |
+| JWT 认证系统 | ✅ |
+| 登录/注册页面 | ✅ |
+| 管理后台 | ✅ |
+| 学生管理 | ✅ |
+| 健康记录管理 | ✅ |
+
+### 🚧 开发中
+
+- [ ] OCR 体检报告扫描 (需 GLM-OCR 模型)
+- [ ] 实时语音对话
+- [ ] 微信/短信家长通知
+
+### 📋 计划中
+
+- [ ] 医院营养科对接
+- [ ] 企业团餐管理
+- [ ] 养老院营养管理
+
 ## 目录
 
 - [快速开始](#快速开始)
+- [部署指南](#部署指南)
+  - [Windows](#windows-部署)
+  - [macOS](#macos-部署)
 - [项目结构](#项目结构)
 - [环境要求](#环境要求)
-- [后端部署](#后端部署)
-- [前端部署](#前端部署)
-- [OCR服务部署](#ocr服务部署)
-- [开发说明](#开发说明)
+- [配置说明](#配置说明)
 - [API文档](#api文档)
+- [常见问题](#常见问题)
 
 ---
 
@@ -20,90 +63,222 @@
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/yourusername/nutrimind.git
-cd nutrimind
+git clone https://github.com/kabishou11/openhealthy.git
+cd openhealthy
 ```
 
-### 2. 启动所有服务
+### 2. 启动服务
 
 ```bash
-# 方式一：使用启动脚本
-./start-all.sh
-
-# 方式二：手动启动
-# 终端1 - 启动后端API
+# 终端1 - 启动后端 (端口 3001)
 cd backend && npm run dev
 
-# 终端2 - 启动前端
+# 终端2 - 启动前端 (端口 3000)
 cd frontend && npm run dev
-
-# 终端3 - 启动OCR服务（可选，需要GLM-OCR模型）
-cd backend && ./start-ocr.sh
 ```
 
 ### 3. 访问应用
 
 - 前端页面: http://localhost:3000
 - 后端API: http://localhost:3001
-- OCR服务: http://localhost:8081
+- 健康检查: http://localhost:3001/health
+
+---
+
+## 部署指南
+
+### Windows 部署
+
+#### 前置要求
+
+1. **安装 Node.js**
+   - 下载地址: https://nodejs.org/zh-cn/
+   - 选择 LTS 版本 (>= 18.x)
+   - 安装时勾选 "Add to PATH"
+
+2. **安装 Git** (可选)
+   - 下载地址: https://git-scm.com/
+
+#### 部署步骤
+
+```powershell
+# 1. 克隆项目
+git clone https://github.com/kabishou11/openhealthy.git
+cd openhealthy
+
+# 2. 安装后端依赖
+cd backend
+npm install
+
+# 3. 复制环境变量配置
+copy .env.example .env
+
+# 4. 编辑 .env 文件，配置 ModelScope Token
+# 打开 .env 文件，修改以下内容：
+# MODELSCOPE_TOKEN=你的ModelScopeToken
+# (Token 获取地址: https://www.modelscope.cn/my/token)
+
+# 5. 启动后端 (新开一个终端窗口)
+npm run dev
+
+# 6. 安装前端依赖 (新开一个终端窗口)
+cd ..\frontend
+npm install
+
+# 7. 启动前端
+npm run dev
+```
+
+#### 使用 PowerShell 一键启动脚本
+
+创建 `start.ps1` 文件：
+
+```powershell
+# 启动后端
+Start-Process powershell -ArgumentList "-Command", "cd backend; npm run dev"
+
+# 启动前端
+Start-Process powershell -ArgumentList "-Command", "cd frontend; npm run dev"
+
+Write-Host "服务已启动!"
+Write-Host "前端: http://localhost:3000"
+Write-Host "后端: http://localhost:3001"
+```
+
+运行：`powershell -ExecutionPolicy Bypass -File start.ps1`
+
+---
+
+### macOS 部署
+
+#### 前置要求
+
+1. **安装 Homebrew** (如果未安装)
+   ```bash
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   ```
+
+2. **安装 Node.js**
+   ```bash
+   brew install node
+   ```
+
+#### 部署步骤
+
+```bash
+# 1. 克隆项目
+git clone https://github.com/kabishou11/openhealthy.git
+cd openhealthy
+
+# 2. 安装后端依赖
+cd backend
+npm install
+
+# 3. 复制环境变量配置
+cp .env.example .env
+
+# 4. 编辑 .env 文件
+# 打开 .env 文件，修改以下内容：
+# MODELSCOPE_TOKEN=你的ModelScopeToken
+# (Token 获取地址: https://www.modelscope.cn/my/token)
+
+# 5. 启动后端
+npm run dev
+
+# 6. 新开终端，安装前端依赖
+cd ../frontend
+npm install
+
+# 7. 启动前端
+npm run dev
+```
+
+#### 使用脚本一键启动
+
+创建 `start.sh` 文件：
+
+```bash
+#!/bin/bash
+echo "启动 NutriMind 服务..."
+
+# 启动后端
+cd backend
+npm run dev &
+BACKEND_PID=$!
+
+# 等待后端启动
+sleep 5
+
+# 启动前端
+cd ../frontend
+npm run dev &
+FRONTEND_PID=$!
+
+echo "========================================="
+echo "NutriMind 已启动!"
+echo "前端: http://localhost:3000"
+echo "后端: http://localhost:3001"
+echo "========================================="
+echo "按 Ctrl+C 停止服务"
+
+# 捕获 Ctrl+C
+trap "kill $BACKEND_PID $FRONTEND_PID; exit" SIGINT
+
+# 等待
+wait
+```
+
+运行：
+```bash
+chmod +x start.sh
+./start.sh
+```
 
 ---
 
 ## 项目结构
 
 ```
-openhelthy/
+openhealthy/
 ├── backend/                      # Node.js 后端 (Fastify)
 │   ├── src/
 │   │   ├── agents/              # LangChain/LangGraph AI Agents
 │   │   │   └── langchain-agents.ts
-│   │   ├── mcp_tools/           # Model Context Protocol 工具
-│   │   │   ├── howtocook.ts     # 菜谱工具 (343道菜谱)
-│   │   │   ├── nutrition-db.ts  # 营养数据库
-│   │   │   └── user-health.ts   # 用户健康档案
-│   │   ├── rag/                 # RAG 知识库
-│   │   │   └── knowledge-base.ts
+│   │   ├── mcp_tools/           # MCP 工具
+│   │   │   ├── recipe-database.ts  # 食谱数据库 (140道)
+│   │   │   └── nutrition-db.ts   # 营养数据库
+│   │   ├── modelscope/          # ModelScope API 客户端
+│   │   │   └── client.ts
 │   │   ├── routes/              # Fastify 路由
 │   │   │   ├── chat.ts          # 智能对话
 │   │   │   ├── menu.ts          # 餐单规划
+│   │   │   ├── menus.ts         # 食谱管理
 │   │   │   ├── nutrition.ts     # 营养分析
-│   │   │   └── health.ts        # 健康档案
-│   │   ├── ocr/                 # OCR 服务
-│   │   │   └── glm-ocr-service.py
-│   │   ├── websocket/           # WebSocket 处理
+│   │   │   ├── auth.ts          # 认证
+│   │   │   └── health-records.ts # 健康记录
+│   │   ├── auth/                # 认证中间件
+│   │   │   ├── jwt.ts
+│   │   │   └── middleware.ts
 │   │   └── index.ts             # 入口文件
-│   ├── .ocr-venv/               # OCR Python 虚拟环境
-│   ├── setup-ocr-venv.sh         # OCR 环境设置脚本
-│   ├── start-ocr.sh             # OCR 服务启动脚本
+│   ├── prisma/                  # 数据库 schema
 │   └── package.json
 │
 ├── frontend/                    # Nuxt 3 前端
-│   ├── pages/                   # 页面
+│   ├── pages/
 │   │   ├── index.vue           # 首页
 │   │   ├── chat.vue            # 智能对话
 │   │   ├── menu.vue            # 餐单规划
-│   │   ├── recipes.vue         # 食谱浏览
-│   │   ├── analysis.vue        # 健康分析
-│   │   ├── students.vue        # 学生管理
-│   │   └── ocr.vue             # OCR 扫描
-│   ├── components/             # Vue 组件
-│   │   ├── NavBar.vue          # 导航栏
-│   │   ├── ChatWidget.vue      # 对话组件
-│   │   └── HealthCard.vue      # 健康卡片
-│   ├── composables/            # Vue 组合式函数
-│   │   ├── useChat.ts          # 对话逻辑
-│   │   ├── useNutrition.ts     # 营养计算
-│   │   └── useHealth.ts        # 健康档案
-│   ├── stores/                 # Pinia 状态管理
-│   ├── assets/                 # 静态资源
+│   │   ├── recipes/            # 食谱浏览
+│   │   ├── health/             # 健康分析
+│   │   ├── dashboard.vue       # 控制台
+│   │   ├── login.vue           # 登录
+│   │   ├── register.vue        # 注册
+│   │   └── admin/              # 管理后台
+│   ├── composables/             # Vue 组合式函数
+│   ├── stores/                  # Pinia 状态管理
 │   └── nuxt.config.ts
 │
-├── models/                      # 本地模型
-│   └── GLM-OCR/                # GLM-OCR OCR模型
-│
-├── whatToEat/                   # 参考项目
-├── kb/                          # 知识库
-├── docs/                        # 文档
+├── CLAUDE.md                    # 项目开发文档
 └── README.md                    # 本文件
 ```
 
@@ -116,238 +291,45 @@ openhelthy/
 | 软件 | 版本 | 说明 |
 |------|------|------|
 | Node.js | >= 18 | 建议使用 LTS 版本 |
-| Python | 3.11 | OCR 服务需要 |
-| npm/yarn | 最新版 | 依赖管理 |
-| Git | 最新版 | 版本控制 |
+| npm | 最新版 | 依赖管理 |
 
 ### 可选软件
 
 | 软件 | 版本 | 说明 |
 |------|------|------|
-| PostgreSQL | >= 15 | 生产环境数据库 |
-| Redis | >= 7 | 缓存和会话存储 |
-| GLM-OCR Model | - | 本地OCR模型（位于 models/GLM-OCR） |
+| Redis | >= 7 | 缓存 (可选，当前使用内存) |
 
 ---
 
-## 后端部署
+## 配置说明
 
-### 1. 安装 Node.js 依赖
+### 环境变量配置
 
-```bash
-cd backend
-npm install
-```
-
-### 2. 配置环境变量
-
-```bash
-# 复制环境变量模板
-cp .env.example .env
-
-# 编辑配置
-vim .env
-```
-
-`.env` 配置示例：
+复制 `backend/.env.example` 到 `.env`，主要配置：
 
 ```env
-# API 配置
-OPENAI_API_KEY=sk-your-api-key
-OPENAI_MODEL=gpt-4o
-
 # 服务器配置
 PORT=3001
 NODE_ENV=development
-LOG_LEVEL=info
+
+# JWT 认证
+JWT_SECRET=your-secret-key-change-in-production
+JWT_EXPIRES_IN=7d
+
+# ModelScope API (必须配置!)
+# 获取 Token: https://www.modelscope.cn/my/token
+MODELSCOPE_TOKEN=ms-xxxxxxxxxxxxxxxxxxxxxxxx
 
 # CORS 配置
 CORS_ORIGINS=http://localhost:3000,http://localhost:1420
-
-# OCR 服务（可选）
-GLM_OCR_URL=http://127.0.0.1:8081
 ```
 
-### 3. 启动开发服务器
+### ModelScope Token 获取
 
-```bash
-# 开发模式（热重载）
-npm run dev
-
-# 生产模式
-npm run build
-npm start
-```
-
-### 4. 验证后端
-
-```bash
-# 健康检查
-curl http://localhost:3001/health
-
-# API 状态
-curl http://localhost:3001/api/v1/status
-```
-
----
-
-## 前端部署
-
-### 1. 安装 Node.js 依赖
-
-```bash
-cd frontend
-npm install
-```
-
-### 2. 配置环境变量（如需要）
-
-```bash
-# 复制环境变量模板
-cp .env.example .env.local
-
-# 配置 API 地址
-NUXT_PUBLIC_API_URL=http://localhost:3001
-```
-
-### 3. 启动开发服务器
-
-```bash
-npm run dev
-```
-
-### 4. 构建生产版本
-
-```bash
-npm run build
-npm run preview
-```
-
-### 5. 验证前端
-
-访问 http://localhost:3000
-
----
-
-## OCR服务部署
-
-OCR 服务使用 GLM-OCR 本地模型进行文字识别。
-
-### 1. 设置 Python 虚拟环境
-
-```bash
-cd backend
-
-# 使用提供的脚本设置环境
-chmod +x setup-ocr-venv.sh
-./setup-ocr-venv.sh
-```
-
-### 2. 配置 GLM-OCR 模型
-
-确保模型文件位于：
-
-```
-models/GLM-OCR/
-├── config.json
-├── pytorch_model.bin
-├── tokenizer.json
-└── ...
-```
-
-### 3. 启动 OCR 服务
-
-```bash
-cd backend
-
-# 方式一：使用启动脚本
-chmod +x start-ocr.sh
-./start-ocr.sh
-
-# 方式二：手动启动
-.ocr-venv/bin/python src/ocr/glm-ocr-service.py --port 8081
-
-# 方式三：后台运行
-nohup .ocr-venv/bin/python src/ocr/glm-ocr-service.py --port 8081 > /tmp/ocr.log 2>&1 &
-```
-
-### 4. 验证 OCR 服务
-
-```bash
-# 健康检查
-curl http://localhost:8081/health
-
-# 加载模型
-curl -X POST -H "Content-Type: application/json" -d '{}' http://localhost:8081/load
-
-# 测试 OCR
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"action": "ocr", "image": "BASE64_IMAGE_DATA", "prompt": "Text Recognition:"}' \
-  http://localhost:8081/
-```
-
-### 5. OCR 服务端点
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/health` | GET | 检查服务状态 |
-| `/load` | POST | 加载 GLM-OCR 模型 |
-| `/unload` | POST | 卸载模型，释放内存 |
-| `/` | POST | 执行 OCR 识别 |
-
-### OCR 请求示例
-
-```bash
-# 加载模型
-curl -X POST http://127.0.0.1:8081/load
-
-# 识别图片
-curl -X POST http://127.0.0.1:8081/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "action": "ocr",
-    "image": "data:image/png;base64,IMAGE_BASE64_STRING",
-    "prompt": "Text Recognition:"
-  }'
-
-# 提取健康数据
-curl -X POST http://127.0.0.1:8081/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "action": "health",
-    "image": "data:image/png;base64,IMAGE_BASE64_STRING"
-  }'
-```
-
----
-
-## 开发说明
-
-### 代码规范
-
-- TypeScript 严格模式
-- ESLint 代码检查
-- Prettier 代码格式化
-- Git 提交信息规范
-
-### 添加新功能
-
-1. **添加 API 路由**: 在 `backend/src/routes/` 添加新文件
-2. **添加前端页面**: 在 `frontend/pages/` 添加 `.vue` 文件
-3. **添加 AI 工具**: 在 `backend/src/mcp_tools/` 添加工具
-4. **更新文档**: 同步更新 README 和 API 文档
-
-### 测试
-
-```bash
-# 后端测试
-cd backend
-npm test
-
-# 前端测试
-cd frontend
-npm test
-```
+1. 访问 https://www.modelscope.cn/my/token
+2. 登录/注册账号
+3. 创建新 Token
+4. 复制 Token 到 `.env` 文件
 
 ---
 
@@ -357,112 +339,62 @@ npm test
 
 ```http
 GET /health
-GET /api/v1/status
 ```
 
-### 智能对话
+### 认证
 
 ```http
-POST /api/v1/chat                  # 发送消息
-WS /ws/chat                         # WebSocket 实时对话
-GET /api/v1/chat/:sessionId        # 获取对话历史
+POST /api/v1/auth/register     # 注册
+POST /api/v1/auth/login        # 登录
+GET  /api/v1/auth/profile      # 获取当前用户
 ```
 
-### 餐单规划
+### 食谱
 
 ```http
-GET /api/v1/menu/recipes           # 搜索食谱
-GET /api/v1/menu/recipes/:id       # 食谱详情
-POST /api/v1/menu/generate         # 生成餐单
-GET /api/v1/menu/categories        # 获取分类
+GET  /api/v1/menu/recipes                    # 搜索食谱
+GET  /api/v1/menu/recipes/:id                # 食谱详情
+GET  /api/v1/menu/categories                  # 获取分类
+GET  /api/v1/menu/recipes/random?count=3     # 随机食谱
 ```
 
-### 营养分析
+### 餐单
 
 ```http
-GET /api/v1/nutrition/foods        # 搜索食物
-POST /api/v1/nutrition/calculate   # 计算营养
-POST /api/v1/nutrition/analyze     # 营养分析
+POST   /api/v1/menu/generate                  # 生成餐单
+GET    /api/v1/menu/random-meal?type=午餐     # 单餐重新生成
 ```
 
-### 健康管理
+### 营养
 
 ```http
-POST /api/v1/health/profile        # 创建健康档案
-GET /api/v1/health/profile/:id     # 获取档案
-PUT /api/v1/health/profile/:id     # 更新档案
-```
-
-### OCR 服务
-
-```http
-GET /api/v1/ocr/status             # OCR 状态
-POST /api/v1/ocr/load             # 加载模型
-POST /api/v1/ocr/unload           # 卸载模型
-POST /api/v1/ocr                  # 执行 OCR
-POST /api/v1/ocr/health-checkup   # 提取健康数据
-POST /api/v1/ocr/pdf              # PDF 解析
-```
-
----
-
-## Docker 部署
-
-### 开发环境
-
-```bash
-docker-compose up -d
-```
-
-### 生产环境
-
-```bash
-docker-compose -f docker-compose.prod.yml up -d
-```
-
-### 环境变量
-
-```yaml
-# docker-compose.yml 示例
-services:
-  backend:
-    build: ./backend
-    ports:
-      - "3001:3001"
-    environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - NODE_ENV=production
-
-  frontend:
-    build: ./frontend
-    ports:
-      - "3000:3000"
+GET  /api/v1/nutrition/foods        # 搜索食物
+POST /api/v1/nutrition/calculate     # 计算营养
 ```
 
 ---
 
 ## 常见问题
 
-### Q: OCR 服务无法启动？
+### Q: 餐单生成失败？
 
 A: 检查以下几点：
-1. Python 3.11 是否安装
-2. 虚拟环境是否正确创建
-3. GLM-OCR 模型文件是否完整
-4. 端口 8081 是否被占用
+1. `.env` 中是否正确配置 `MODELSCOPE_TOKEN`
+2. Token 是否有效 (访问 https://www.modelscope.cn/my/token 检查)
+3. 后端是否正常启动 (`npm run dev`)
 
 ### Q: 前端无法连接后端？
 
-A: 检查 CORS 配置：
-1. 确认 `.env` 中的 `CORS_ORIGINS` 包含前端地址
-2. 确认后端正在运行
+A:
+1. 确认后端运行在端口 3001
+2. 检查浏览器控制台 CORS 错误
+3. 确认 `.env` 中 `CORS_ORIGINS` 包含前端地址
 
-### Q: AI 对话无响应？
+### Q: 食谱搜索返回空结果？
 
-A: 检查：
-1. `OPENAI_API_KEY` 是否正确
-2. 网络是否能访问 OpenAI API
-3. 查看后端日志
+A: 这是 URL 编码问题，使用时确保参数正确编码。例如：
+- 正确: `/api/v1/menu/recipes?category=%E6%97%A9%E9%A4%90`
+- 或使用前端页面搜索
 
 ---
 
@@ -474,9 +406,8 @@ A: 检查：
 |------|------|
 | Node.js 18+ | 运行时 |
 | Fastify | Web 框架 |
-| LangChain + LangGraph | AI 编排 |
-| OpenAI GPT-4o | LLM |
-| GLM-OCR | 本地 OCR |
+| ModelScope API (Qwen3-8B) | LLM 大模型 |
+| JWT | 用户认证 |
 | WebSocket | 实时通信 |
 
 ### 前端
@@ -486,8 +417,6 @@ A: 检查：
 | Nuxt 3 | Vue 框架 |
 | Tailwind CSS | 样式 |
 | Pinia | 状态管理 |
-| Chart.js | 图表 |
-| Vue Transition | 动画 |
 
 ---
 
@@ -497,10 +426,9 @@ MIT License
 
 ---
 
-## 联系方式
+## Star History
 
-- GitHub: https://github.com/nutrimind
-- Email: hello@nutrimind.ai
+[![Star History Chart](https://api.star-history.com/svg?repos=kabishou11/openhealthy&type=Date)](https://star-history.com/#kabishou11/openhealthy&Date)
 
 ---
 
