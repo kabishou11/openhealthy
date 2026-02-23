@@ -38,7 +38,9 @@ const isUploading = ref(false)
 const isProcessing = ref(false)
 const uploadedImage = ref<string | null>(null)
 const extractedData = ref<ExtractedData | null>(null)
+const ocrRawText = ref<string | null>(null)
 const error = ref<string | null>(null)
+const ocrMode = ref<'health-checkup' | 'handwriting' | 'table' | 'general'>('health-checkup')
 
 // GLM-OCR Model state - pipeline mode
 const modelLoaded = ref(false)
@@ -339,6 +341,7 @@ const processPdfFile = async (file: File) => {
         }
       } catch (err) {
         error.value = err instanceof Error ? err.message : 'PDF处理失败，请重试或尝试上传图片'
+      } finally {
         isProcessing.value = false
       }
     }
@@ -360,42 +363,57 @@ const processImage = async () => {
 
   isProcessing.value = true
   error.value = null
+  ocrRawText.value = null
 
-  console.log('Starting OCR process...')
+  console.log('Starting OCR process, mode:', ocrMode.value)
 
   try {
-    const response = await fetch('http://127.0.0.1:3001/api/v1/ocr/health-checkup', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        image: uploadedImage.value,
-      }),
-    })
+    if (ocrMode.value === 'health-checkup') {
+      // Structured health data extraction
+      const response = await fetch('http://127.0.0.1:3001/api/v1/ocr/health-checkup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: uploadedImage.value }),
+      })
 
-    console.log('OCR response status:', response.status)
+      if (!response.ok) {
+        const errData = await response.json()
+        throw new Error(errData.error || 'OCR处理失败')
+      }
 
-    if (!response.ok) {
-      const errData = await response.json()
-      console.error('OCR error response:', errData)
-      throw new Error(errData.error || 'OCR处理失败')
-    }
-
-    const data = await response.json()
-    console.log('OCR success:', data.success)
-
-    if (data.success && data.extractedData) {
-      extractedData.value = data.extractedData
+      const data = await response.json()
+      if (data.success && data.extractedData) {
+        extractedData.value = data.extractedData
+      } else {
+        throw new Error(data.error || 'OCR识别失败')
+      }
     } else {
-      throw new Error(data.error || 'OCR识别失败')
+      // General / handwriting / table OCR - returns raw text
+      const response = await fetch('http://127.0.0.1:3001/api/v1/ocr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: uploadedImage.value, mode: ocrMode.value }),
+      })
+
+      if (!response.ok) {
+        const errData = await response.json()
+        throw new Error(errData.error || 'OCR处理失败')
+      }
+
+      const data = await response.json()
+      if (data.success) {
+        ocrRawText.value = data.text || ''
+      } else {
+        throw new Error(data.error || 'OCR识别失败')
+      }
     }
   }
   catch (err) {
     console.error('OCR error:', err)
     error.value = err instanceof Error ? err.message : 'OCR处理失败，请重试'
-    // Use mock data as fallback for demo
-    extractedData.value = mockOCRResult
+    if (ocrMode.value === 'health-checkup') {
+      extractedData.value = mockOCRResult
+    }
   }
   finally {
     isProcessing.value = false
@@ -405,6 +423,7 @@ const processImage = async () => {
 const reset = () => {
   uploadedImage.value = null
   extractedData.value = null
+  ocrRawText.value = null
   error.value = null
   const input = document.getElementById('ocr-file-input') as HTMLInputElement
   if (input) input.value = ''
@@ -523,8 +542,33 @@ const getVisionStatus = (vision: number) => {
           <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
-          上传体检表
+          上传文件
         </h3>
+
+        <!-- OCR Mode Selector -->
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-gray-700 mb-2">识别模式</label>
+          <div class="grid grid-cols-2 gap-2">
+            <button
+              v-for="m in [
+                { value: 'health-checkup', label: '体检表', icon: '🏥' },
+                { value: 'handwriting', label: '手写识别', icon: '✍️' },
+                { value: 'table', label: '表格识别', icon: '📊' },
+                { value: 'general', label: '通用识别', icon: '📄' },
+              ]"
+              :key="m.value"
+              @click="ocrMode = m.value as any"
+              :class="[
+                'px-3 py-2 rounded-xl text-sm font-medium transition-colors border',
+                ocrMode === m.value
+                  ? 'bg-violet-500 text-white border-violet-500'
+                  : 'bg-white text-gray-600 border-gray-200 hover:border-violet-300'
+              ]"
+            >
+              {{ m.icon }} {{ m.label }}
+            </button>
+          </div>
+        </div>
 
         <div
           class="relative border-2 border-dashed rounded-2xl p-8 text-center transition-all duration-300"
@@ -594,7 +638,7 @@ const getVisionStatus = (vision: number) => {
         </div>
 
         <button
-          v-if="uploadedImage && !extractedData"
+          v-if="uploadedImage && !extractedData && !ocrRawText"
           @click="processImage"
           class="btn w-full mt-4 flex items-center justify-center gap-2"
           :class="modelLoaded ? 'btn-primary' : 'bg-gray-300 cursor-not-allowed'"
@@ -631,7 +675,27 @@ const getVisionStatus = (vision: number) => {
           识别结果
         </h3>
 
-        <template v-if="extractedData">
+        <template v-if="ocrRawText">
+          <!-- Raw OCR text result (for non-health-checkup modes) -->
+          <div class="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-4">
+            <div class="flex items-center justify-between mb-2">
+              <h4 class="font-semibold text-gray-700 text-sm">识别文本</h4>
+              <button
+                @click="() => { navigator.clipboard.writeText(ocrRawText || '') }"
+                class="text-xs text-violet-600 hover:text-violet-800 flex items-center gap-1"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                复制
+              </button>
+            </div>
+            <pre class="text-sm text-gray-800 whitespace-pre-wrap font-mono leading-relaxed max-h-96 overflow-y-auto">{{ ocrRawText }}</pre>
+          </div>
+          <button @click="reset" class="btn btn-secondary w-full">重新识别</button>
+        </template>
+
+        <template v-else-if="extractedData">
           <!-- Basic Info -->
           <div class="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-100 rounded-xl p-4 mb-4">
             <h4 class="font-semibold text-emerald-900 mb-3 flex items-center gap-2">

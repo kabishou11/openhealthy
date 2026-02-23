@@ -111,7 +111,7 @@ export async function registerOCRRoutes(fastify: any) {
 
   // Perform OCR on image
   fastify.post('/api/v1/ocr', async (request: any, reply: any) => {
-    const { image, prompt } = request.body as { image: string; prompt?: string }
+    const { image, prompt, mode } = request.body as { image: string; prompt?: string; mode?: string }
 
     if (!image) {
       return reply.status(400).send({ error: 'Image data is required' })
@@ -137,10 +137,10 @@ export async function registerOCRRoutes(fastify: any) {
     }
 
     try {
-      const response = await fetch(`${GLM_OCR_URL}/`, {
+      const response = await fetch(`${GLM_OCR_URL}/ocr`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'ocr', image, prompt: prompt || 'Text Recognition:' }),
+        body: JSON.stringify({ image, prompt, mode: mode || 'general' }),
       })
 
       if (!response.ok) {
@@ -190,10 +190,10 @@ export async function registerOCRRoutes(fastify: any) {
     try {
       fastify.log.info('Using GLM-OCR pipeline for health checkup extraction')
 
-      const response = await fetch(`${GLM_OCR_URL}/`, {
+      const response = await fetch(`${GLM_OCR_URL}/health-checkup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'health', image }),
+        body: JSON.stringify({ image }),
       })
 
       if (!response.ok) {
@@ -257,22 +257,44 @@ export async function registerOCRRoutes(fastify: any) {
         return reply.status(400).send({ error: 'No file data provided' })
       }
 
-      // Decode base64 to buffer
+      fastify.log.info(`Processing PDF: ${filename || 'unknown'}`)
+
+      // Try GLM-OCR service first (handles scanned PDFs)
+      const ocrStatus = await getOCRStatus()
+      if (ocrStatus.available) {
+        try {
+          const response = await fetch(`${GLM_OCR_URL}/pdf`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file }),
+            signal: AbortSignal.timeout(120000), // 2 min timeout for multi-page PDFs
+          })
+          if (response.ok) {
+            const result = await response.json() as { pages?: number; text?: string }
+            const healthData = parseHealthDataFromText(result.text || '')
+            return {
+              success: true,
+              pages: result.pages || 1,
+              rawText: (result.text || '').substring(0, 2000),
+              extractedData: healthData,
+              source: 'glm-ocr-pipeline',
+            }
+          }
+        } catch (ocrErr) {
+          fastify.log.warn('GLM-OCR PDF failed, falling back to pdf-parse:', ocrErr)
+        }
+      }
+
+      // Fallback: pdf-parse (text-based PDFs only)
       let fileBuffer: Buffer
       if (file.startsWith('data:application/pdf;base64,')) {
-        const base64Data = file.replace(/^data:application\/pdf;base64,/, '')
-        fileBuffer = Buffer.from(base64Data, 'base64')
+        fileBuffer = Buffer.from(file.replace(/^data:application\/pdf;base64,/, ''), 'base64')
       } else {
         fileBuffer = Buffer.from(file, 'base64')
       }
 
-      fastify.log.info(`Processing PDF file: ${filename || 'unknown'}, size: ${fileBuffer.length} bytes`)
-
-      // Parse PDF
       const pdfData = await parsePdf(fileBuffer)
-      fastify.log.info(`PDF parsed: ${pdfData.numpages} pages, text length: ${pdfData.text.length}`)
-
-      // Parse health data from text
+      fastify.log.info(`PDF parsed via pdf-parse: ${pdfData.numpages} pages`)
       const healthData = parseHealthDataFromText(pdfData.text)
 
       return {
@@ -282,8 +304,7 @@ export async function registerOCRRoutes(fastify: any) {
         extractedData: healthData,
         source: 'pdf-parse',
       }
-    }
-    catch (error: any) {
+    } catch (error: any) {
       fastify.log.error(error)
       return reply.status(500).send({ error: error.message || 'PDF processing failed' })
     }
