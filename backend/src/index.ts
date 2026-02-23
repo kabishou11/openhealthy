@@ -53,8 +53,8 @@ const logger = createLogger('nutrimind-api');
 function getPythonPath(): { path: string; isVenv: boolean } {
   const isWindows = process.platform === 'win32'
 
-  // Get project root (parent of backend directory)
-  const projectRoot = path.resolve(__dirname, '..')
+  // Get project root - go up two levels from src directory
+  const projectRoot = path.resolve(__dirname, '../..')
 
   // Check for virtual environment in project root - support both .ocr-venv and .venv
   const venvNames = ['.ocr-venv', '.venv']
@@ -83,9 +83,12 @@ function getPythonPath(): { path: string; isVenv: boolean } {
   // Check if venv exists
   for (const venvPath of venvPaths) {
     if (fs.existsSync(venvPath)) {
+      console.log(`[DEBUG] Found venv at: ${venvPath}`)
       return { path: venvPath, isVenv: true }
     }
   }
+
+  console.log(`[DEBUG] Checked venv paths: ${venvPaths.join(', ')}`)
 
   // Fall back to system Python
   if (isWindows) {
