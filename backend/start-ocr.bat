@@ -2,7 +2,9 @@
 REM Start OCR Service Script for Windows
 
 set "SCRIPT_DIR=%~dp0"
-set "VENV_DIR=%SCRIPT_DIR%.ocr-venv"
+REM Project root is one level up from backend/
+set "PROJECT_ROOT=%SCRIPT_DIR%.."
+set "VENV_DIR=%PROJECT_ROOT%\.venv"
 set "OCR_SCRIPT=%SCRIPT_DIR%src\ocr\glm-ocr-service.py"
 set "PORT=%1"
 
@@ -14,7 +16,10 @@ echo.
 REM Check if virtual environment exists
 if not exist "%VENV_DIR%" (
     echo Virtual environment not found at: %VENV_DIR%
-    echo Please run setup-ocr-venv.bat first.
+    echo Please create it first:
+    echo   cd %PROJECT_ROOT%
+    echo   python -m venv .venv
+    echo   .venv\Scripts\pip install torch transformers accelerate tiktoken verovio Pillow pdf2image
     pause
     exit /b 1
 )

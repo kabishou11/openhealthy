@@ -56,8 +56,8 @@ function getPythonPath(): { path: string; isVenv: boolean } {
   // Get project root - go up two levels from src directory
   const projectRoot = path.resolve(__dirname, '../..')
 
-  // Check for virtual environment in project root - support both .ocr-venv and .venv
-  const venvNames = ['.ocr-venv', '.venv']
+  // Check for virtual environment in project root - .venv first, then .ocr-venv as fallback
+  const venvNames = ['.venv', '.ocr-venv']
   const venvPaths: string[] = []
 
   for (const venvName of venvNames) {
@@ -114,26 +114,11 @@ async function startGLMOCRService() {
   }
 
   if (pythonInfo.isVenv) {
-    // Add venv site-packages to PYTHONPATH
-    const sitePackages = pythonInfo.path.includes('.ocr-venv') || pythonInfo.path.includes('.venv')
-      ? pythonInfo.path.replace(/\/(bin|Scripts)\/python.*$/, '/Lib/site-packages')
-      : ''
-    if (sitePackages) {
-      try {
-        const globPath = sitePackages.replace('*', '3.*')
-        if (fs.existsSync(globPath.replace('*', '9'))) {
-          env.PYTHONPATH = globPath.replace('*', '9') + ':' + (env.PYTHONPATH || '')
-        }
-        if (fs.existsSync(globPath.replace('*', '10'))) {
-          env.PYTHONPATH = globPath.replace('*', '10') + ':' + (env.PYTHONPATH || '')
-        }
-        if (fs.existsSync(globPath.replace('*', '11'))) {
-          env.PYTHONPATH = globPath.replace('*', '11') + ':' + (env.PYTHONPATH || '')
-        }
-      } catch {
-        // Ignore path resolution errors
-      }
-    }
+    // When using venv Python directly, it handles its own site-packages automatically.
+    // Just ensure the venv bin/Scripts is on PATH so subprocesses can find venv tools.
+    const venvDir = path.dirname(path.dirname(pythonInfo.path)) // strip Scripts/python.exe
+    const venvBin = path.join(venvDir, isWindows ? 'Scripts' : 'bin')
+    env.PATH = venvBin + path.delimiter + (env.PATH || '')
   }
 
   try {
