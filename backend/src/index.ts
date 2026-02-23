@@ -56,16 +56,23 @@ function getPythonPath(): { path: string; isVenv: boolean } {
   // Get project root (parent of backend directory)
   const projectRoot = path.resolve(__dirname, '..')
 
-  // Check for virtual environment in backend directory
-  const venvPaths = isWindows
-    ? [
-        path.join(projectRoot, '.ocr-venv', 'Scripts', 'python.exe'),
-        path.join(projectRoot, '.ocr-venv', 'Scripts', 'python.bat'),
-      ]
-    : [
-        path.join(projectRoot, '.ocr-venv', 'bin', 'python'),
-        path.join(projectRoot, '.ocr-venv', 'bin', 'python3'),
-      ]
+  // Check for virtual environment in project root - support both .ocr-venv and .venv
+  const venvNames = ['.ocr-venv', '.venv']
+  const venvPaths: string[] = []
+
+  for (const venvName of venvNames) {
+    if (isWindows) {
+      venvPaths.push(
+        path.join(projectRoot, venvName, 'Scripts', 'python.exe'),
+        path.join(projectRoot, venvName, 'Scripts', 'python.bat'),
+      )
+    } else {
+      venvPaths.push(
+        path.join(projectRoot, venvName, 'bin', 'python'),
+        path.join(projectRoot, venvName, 'bin', 'python3'),
+      )
+    }
+  }
 
   // Check environment variable first
   const envPython = process.env.OCR_PYTHON_PATH
@@ -105,8 +112,8 @@ async function startGLMOCRService() {
 
   if (pythonInfo.isVenv) {
     // Add venv site-packages to PYTHONPATH
-    const sitePackages = pythonInfo.path.includes('.ocr-venv')
-      ? pythonInfo.path.replace(/\/(bin|Scripts)\/python.*$/, '/lib/python*/site-packages')
+    const sitePackages = pythonInfo.path.includes('.ocr-venv') || pythonInfo.path.includes('.venv')
+      ? pythonInfo.path.replace(/\/(bin|Scripts)\/python.*$/, '/Lib/site-packages')
       : ''
     if (sitePackages) {
       try {

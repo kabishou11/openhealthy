@@ -1,0 +1,5 @@
+# OCR 依赖
+torch>=2.0.0
+transformers>=4.30.0
+Pillow>=10.0.0
+pytesseract>=0.3.10
