@@ -33,20 +33,27 @@ async function getOCRStatus(): Promise<{
   available: boolean
   modelLoaded: boolean
   loading: boolean
+  backend: string | null
   progress: { stage: string; percent: number; message: string } | null
+  backends: Record<string, { path: string; available: boolean }> | null
 }> {
   try {
     const response = await fetch(`${GLM_OCR_URL}/health`, { signal: AbortSignal.timeout(2000) })
     if (response.ok) {
       const status = await response.json() as {
         model_loaded?: boolean
+        loading?: boolean
+        backend?: string
         progress?: { stage: string; percent: number; message: string }
+        backends?: Record<string, { path: string; available: boolean }>
       }
       return {
         available: status.model_loaded ?? false,
         modelLoaded: status.model_loaded ?? false,
-        loading: false,
+        loading: status.loading ?? false,
+        backend: status.backend ?? null,
         progress: status.progress ?? null,
+        backends: status.backends ?? null,
       }
     }
   } catch {
@@ -56,7 +63,9 @@ async function getOCRStatus(): Promise<{
     available: false,
     modelLoaded: false,
     loading: false,
+    backend: null,
     progress: null,
+    backends: null,
   }
 }
 
@@ -68,19 +77,22 @@ export async function registerOCRRoutes(fastify: any) {
       available: status.available,
       modelLoaded: status.modelLoaded,
       loading: status.loading,
+      backend: status.backend,
       progress: status.progress,
-      service: 'glm-ocr-pipeline',
+      backends: status.backends,
+      service: 'ocr-dual-backend',
       url: GLM_OCR_URL,
     }
   })
 
-  // Load GLM-OCR model
+  // Load OCR model (backend: "glm-ocr" | "got-ocr")
   fastify.post('/api/v1/ocr/load', async (request: any, reply: any) => {
     try {
+      const { backend } = (request.body as { backend?: string }) || {}
       const response = await fetch(`${GLM_OCR_URL}/load`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ backend: backend || 'got-ocr' }),
       })
 
       if (!response.ok) {
@@ -88,10 +100,12 @@ export async function registerOCRRoutes(fastify: any) {
         throw new Error(error)
       }
 
-      const result = await response.json() as { success?: boolean; message?: string }
+      const result = await response.json() as { success?: boolean; message?: string; backend?: string }
       return {
         success: true,
-        message: result.message || '模型加载完成',
+        loading: true,
+        message: result.message || '模型加载中...',
+        backend: result.backend,
       }
     } catch (error: any) {
       fastify.log.error('Failed to load OCR model:', error)

@@ -1,64 +1,61 @@
 #!/usr/bin/env python3
 """
-OCR Service - GOT-OCR2.0 (General OCR Theory)
-Local inference, no API calls required.
-Model: stepfun-ai/GOT-OCR2_0 (ucaslcl/GOT-OCR2_0)
+OCR Service - Dual Backend
+Supports two backends (user-selectable):
+  1. GLM-OCR  (THUDM/GLM-OCR)        - via vLLM subprocess, best accuracy
+  2. GOT-OCR2 (stepfun-ai/GOT-OCR2_0) - via transformers, no vLLM needed
 
-Supports:
-  - Plain text OCR
-  - Formatted OCR (tables, formulas, markdown)
-  - Fine-grained OCR (by region box or color)
-  - Multi-crop OCR (high-resolution images)
-  - PDF OCR (via pdf2image)
-  - Handwriting recognition
+Endpoints:
+  POST /load            {"backend": "glm-ocr"|"got-ocr"}
+  POST /unload
+  GET  /health
+  POST /ocr             {"image": "<base64>", "mode": "general|handwriting|table|format"}
+  POST /health-checkup  {"image": "<base64>"}
+  POST /pdf             {"file": "<base64>"}
 
-Usage:
-    python glm-ocr-service.py [--port 8081] [--model-path PATH] [--auto-load]
-
-Download model:
-    # From HuggingFace
-    git clone https://huggingface.co/stepfun-ai/GOT-OCR2_0 models/GOT-OCR2_0
-    # From ModelScope
-    modelscope download --model stepfun-ai/GOT-OCR2_0 --local_dir models/GOT-OCR2_0
+Download models:
+  GLM-OCR:   git clone https://huggingface.co/THUDM/GLM-OCR models/GLM-OCR
+  GOT-OCR2:  git clone https://huggingface.co/stepfun-ai/GOT-OCR2_0 models/GOT-OCR2_0
 """
 
-import os
-import sys
-import json
-import base64
-import argparse
-import io
-import signal
-import tempfile
+import os, sys, json, base64, argparse, io, signal, tempfile, threading, time, subprocess
 from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 
-def find_model_path():
-    """Find GOT-OCR2.0 model path"""
-    possible_paths = [
-        Path(__file__).parent.parent.parent / "models" / "GOT-OCR2_0",
-        Path(__file__).parent.parent.parent / "models" / "GOT-OCR2.0",
-        Path(__file__).parent.parent.parent / "models" / "got-ocr",
-        Path(os.path.expanduser("~")) / "models" / "GOT-OCR2_0",
-    ]
-    env_path = os.environ.get("GOT_OCR_PATH") or os.environ.get("GLM_OCR_PATH")
-    if env_path:
-        possible_paths.insert(0, Path(env_path))
-    for path in possible_paths:
-        if path.exists() and (path / "config.json").exists():
-            print(f"[INFO] Found model at: {path}", flush=True)
-            return str(path)
-    return str(possible_paths[0])
+# ---------------------------------------------------------------------------
+# Model path helpers
+# ---------------------------------------------------------------------------
+
+def find_path(env_keys, subdirs):
+    for key in env_keys:
+        v = os.environ.get(key)
+        if v and os.path.exists(v) and os.path.exists(os.path.join(v, "config.json")):
+            return v
+    base = Path(__file__).parent.parent.parent / "models"
+    for d in subdirs:
+        p = base / d
+        if p.exists() and (p / "config.json").exists():
+            return str(p)
+    return str(base / subdirs[0])
 
 
-MODEL_PATH = find_model_path()
+GLM_MODEL_PATH  = find_path(["GLM_OCR_PATH"],  ["GLM-OCR", "glm-ocr"])
+GOT_MODEL_PATH  = find_path(["GOT_OCR_PATH"],  ["GOT-OCR2_0", "GOT-OCR2.0", "got-ocr"])
 
+# ---------------------------------------------------------------------------
 # Global state
-ocr_engine = None
-model_loaded = False
+# ---------------------------------------------------------------------------
+
+current_backend  = None   # "glm-ocr" | "got-ocr" | None
+model_loaded     = False
+loading_in_prog  = False
 loading_progress = {"stage": "ready", "percent": 0, "message": "ready"}
-temp_dir = None
+temp_dir         = None
+
+# Backend instances
+_glm_backend = None
+_got_backend = None
 
 
 def update_progress(stage, percent, message=""):
@@ -67,285 +64,390 @@ def update_progress(stage, percent, message=""):
     print(f"[{percent:3d}%] {stage}: {message}", flush=True)
 
 
-def load_model():
-    global ocr_engine, model_loaded, temp_dir
+# ---------------------------------------------------------------------------
+# GLM-OCR backend  (vLLM subprocess + OpenAI client)
+# ---------------------------------------------------------------------------
 
-    if model_loaded:
-        return True
+VLLM_PORT = int(os.environ.get("VLLM_PORT", "8082"))
 
-    if not os.path.exists(MODEL_PATH):
-        update_progress("error", 0,
-            f"Model not found: {MODEL_PATH}\n"
-            "Download: git clone https://huggingface.co/stepfun-ai/GOT-OCR2_0 models/GOT-OCR2_0"
+class GLMOCRBackend:
+    def __init__(self):
+        self.proc = None          # vLLM subprocess
+        self.client = None        # openai.OpenAI client
+        self.model_name = "GLM-OCR"
+
+    def load(self):
+        if not os.path.exists(GLM_MODEL_PATH):
+            update_progress("error", 0,
+                f"GLM-OCR model not found: {GLM_MODEL_PATH}\n"
+                "Download: git clone https://huggingface.co/THUDM/GLM-OCR models/GLM-OCR")
+            return False
+        try:
+            update_progress("loading", 10, "Checking vLLM installation...")
+            try:
+                import vllm  # noqa: F401
+            except ImportError:
+                update_progress("error", 0,
+                    "vLLM not installed. Run: pip install vllm\n"
+                    "(Requires CUDA GPU. For CPU-only use GOT-OCR2 backend instead.)")
+                return False
+
+            # Check if vLLM already running on our port
+            if self._ping_vllm():
+                update_progress("loading", 80, "Connecting to existing vLLM server...")
+            else:
+                update_progress("loading", 20, "Starting vLLM server...")
+                self._start_vllm()
+                update_progress("loading", 40, "Waiting for vLLM to be ready (this may take a few minutes)...")
+                if not self._wait_vllm(timeout=300):
+                    update_progress("error", 0, "vLLM server failed to start within 5 minutes")
+                    self._kill_vllm()
+                    return False
+
+            update_progress("loading", 90, "Connecting OpenAI client...")
+            from openai import OpenAI
+            self.client = OpenAI(api_key="EMPTY", base_url=f"http://127.0.0.1:{VLLM_PORT}/v1")
+            update_progress("done", 100, f"GLM-OCR ready via vLLM (port {VLLM_PORT})")
+            return True
+        except Exception as e:
+            update_progress("error", 0, str(e))
+            import traceback; traceback.print_exc()
+            return False
+
+    def _start_vllm(self):
+        cmd = [
+            sys.executable, "-m", "vllm.entrypoints.openai.api_server",
+            "--model", GLM_MODEL_PATH,
+            "--port", str(VLLM_PORT),
+            "--trust-remote-code",
+            "--max-model-len", "4096",
+            "--host", "127.0.0.1",
+        ]
+        print(f"[INFO] Starting vLLM: {' '.join(cmd)}", flush=True)
+        self.proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
         )
-        return False
+        # Stream vLLM logs in background
+        def _log():
+            for line in self.proc.stdout:
+                print(f"[vLLM] {line}", end="", flush=True)
+        threading.Thread(target=_log, daemon=True).start()
 
-    try:
-        update_progress("loading", 10, "Importing dependencies...")
-        import torch
-        from transformers import AutoModel, AutoTokenizer
-
-        temp_dir = tempfile.mkdtemp(prefix="got_ocr_")
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"[INFO] Device: {device}", flush=True)
-
-        update_progress("loading", 30, "Loading tokenizer...")
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
-
-        update_progress("loading", 60, "Loading model weights...")
-        if device == "cuda":
-            model = AutoModel.from_pretrained(
-                MODEL_PATH,
-                trust_remote_code=True,
-                low_cpu_mem_usage=True,
-                device_map="cuda",
-                use_safetensors=True,
-                pad_token_id=tokenizer.eos_token_id,
-            ).eval().cuda()
-        else:
-            # CPU mode - slower but functional
-            model = AutoModel.from_pretrained(
-                MODEL_PATH,
-                trust_remote_code=True,
-                low_cpu_mem_usage=True,
-                use_safetensors=True,
-                pad_token_id=tokenizer.eos_token_id,
-            ).eval()
-
-        ocr_engine = {"model": model, "tokenizer": tokenizer, "device": device}
-        update_progress("done", 100, f"Model loaded on {device}")
-        model_loaded = True
-        return True
-
-    except Exception as e:
-        update_progress("error", 0, str(e))
-        import traceback
-        traceback.print_exc()
-        return False
-
-
-def unload_model():
-    global ocr_engine, model_loaded, temp_dir
-
-    if ocr_engine:
+    def _ping_vllm(self):
         try:
+            import urllib.request
+            urllib.request.urlopen(f"http://127.0.0.1:{VLLM_PORT}/health", timeout=2)
+            return True
+        except Exception:
+            return False
+
+    def _wait_vllm(self, timeout=300):
+        deadline = time.time() + timeout
+        pct = 40
+        while time.time() < deadline:
+            if self.proc and self.proc.poll() is not None:
+                update_progress("error", 0, f"vLLM process exited with code {self.proc.returncode}")
+                return False
+            if self._ping_vllm():
+                return True
+            time.sleep(3)
+            pct = min(pct + 2, 85)
+            update_progress("loading", pct, "Waiting for vLLM server...")
+        return False
+
+    def _kill_vllm(self):
+        if self.proc:
+            try:
+                self.proc.terminate()
+                self.proc.wait(timeout=10)
+            except Exception:
+                try: self.proc.kill()
+                except Exception: pass
+            self.proc = None
+
+    def unload(self):
+        self._kill_vllm()
+        self.client = None
+        update_progress("unloaded", 0, "GLM-OCR unloaded")
+
+    def ocr(self, image_bytes: bytes, mode: str = "general") -> str:
+        if not self.client:
+            return "[Error] GLM-OCR not loaded"
+        try:
+            b64 = base64.b64encode(image_bytes).decode()
+            prompt = self._mode_prompt(mode)
+            resp = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[{"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                    {"type": "text", "text": prompt},
+                ]}],
+                max_tokens=4096,
+            )
+            return resp.choices[0].message.content or "[no text recognized]"
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            return f"[GLM-OCR error] {e}"
+
+    def _mode_prompt(self, mode: str) -> str:
+        prompts = {
+            "health-checkup": (
+                "\u8bc6\u522b\u56fe\u7247\u4e2d\u7684\u4f53\u68c0\u8868\u683c\uff0c"
+                "\u8f93\u51fa\u6240\u6709\u6587\u5b57\u5185\u5bb9\uff0c\u4fdd\u6301\u539f\u59cb\u683c\u5f0f\u3002"
+            ),
+            "table":       "\u8bc6\u522b\u56fe\u7247\u4e2d\u7684\u8868\u683c\uff0c\u4fdd\u6301\u8868\u683c\u7ed3\u6784\u8f93\u51fa\u3002",
+            "handwriting": "\u8bc6\u522b\u56fe\u7247\u4e2d\u7684\u624b\u5199\u6587\u5b57\uff0c\u76f4\u63a5\u8f93\u51fa\u8bc6\u522b\u7ed3\u679c\u3002",
+            "format":      "\u8bc6\u522b\u56fe\u7247\u4e2d\u7684\u6587\u5b57\uff0c\u4fdd\u6301\u6392\u7248\u683c\u5f0f\u8f93\u51fa\u3002",
+        }
+        return prompts.get(mode, "\u8bc6\u522b\u56fe\u7247\u4e2d\u7684\u6587\u5b57\u5185\u5bb9\uff0c\u76f4\u63a5\u8f93\u51fa\u8bc6\u522b\u7ed3\u679c\u3002")
+
+
+# ---------------------------------------------------------------------------
+# GOT-OCR2.0 backend  (transformers, no vLLM)
+# ---------------------------------------------------------------------------
+
+class GOTOCRBackend:
+    def __init__(self):
+        self.model = None
+        self.tokenizer = None
+        self.device = "cpu"
+
+    def load(self):
+        if not os.path.exists(GOT_MODEL_PATH):
+            update_progress("error", 0,
+                f"GOT-OCR2 model not found: {GOT_MODEL_PATH}\n"
+                "Download: git clone https://huggingface.co/stepfun-ai/GOT-OCR2_0 models/GOT-OCR2_0")
+            return False
+        try:
+            update_progress("loading", 10, "Importing dependencies...")
             import torch
-            del ocr_engine["model"]
-            del ocr_engine["tokenizer"]
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except Exception:
-            pass
-        ocr_engine = None
+            from transformers import AutoModel, AutoTokenizer
 
-    if temp_dir and os.path.exists(temp_dir):
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            print(f"[INFO] Device: {self.device}", flush=True)
+
+            update_progress("loading", 30, "Loading tokenizer...")
+            self.tokenizer = AutoTokenizer.from_pretrained(GOT_MODEL_PATH, trust_remote_code=True)
+
+            update_progress("loading", 60, "Loading model weights...")
+            kwargs = dict(trust_remote_code=True, low_cpu_mem_usage=True,
+                          use_safetensors=True, pad_token_id=self.tokenizer.eos_token_id)
+            if self.device == "cuda":
+                self.model = AutoModel.from_pretrained(GOT_MODEL_PATH, device_map="cuda", **kwargs).eval().cuda()
+            else:
+                self.model = AutoModel.from_pretrained(GOT_MODEL_PATH, **kwargs).eval()
+
+            update_progress("done", 100, f"GOT-OCR2 ready on {self.device}")
+            return True
+        except Exception as e:
+            update_progress("error", 0, str(e))
+            import traceback; traceback.print_exc()
+            return False
+
+    def unload(self):
+        if self.model is not None:
+            try:
+                import torch
+                del self.model
+                del self.tokenizer
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+            self.model = None
+            self.tokenizer = None
+        update_progress("unloaded", 0, "GOT-OCR2 unloaded")
+
+    def ocr(self, image_bytes: bytes, mode: str = "general", high_res: bool = False) -> str:
+        if self.model is None:
+            return "[Error] GOT-OCR2 not loaded"
         try:
-            import shutil
-            shutil.rmtree(temp_dir)
-        except Exception:
-            pass
-        temp_dir = None
+            from PIL import Image
+            img = Image.open(io.BytesIO(image_bytes))
+            fmt = img.format or "JPEG"
+            suffix = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}.get(fmt, ".jpg")
+            img_path = _save_tmp(image_bytes, suffix)
+            ocr_type = "format" if mode in ("table", "format") else "ocr"
+            result = (self.model.chat_crop(self.tokenizer, img_path, ocr_type=ocr_type)
+                      if high_res else
+                      self.model.chat(self.tokenizer, img_path, ocr_type=ocr_type))
+            try: os.remove(img_path)
+            except Exception: pass
+            return result or "[no text recognized]"
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            return f"[GOT-OCR2 error] {e}"
 
-    model_loaded = False
-    update_progress("unloaded", 0, "Model unloaded")
-    return True
 
+# ---------------------------------------------------------------------------
+# Shared utilities
+# ---------------------------------------------------------------------------
 
-def save_image_bytes(image_bytes: bytes, suffix: str = ".jpg") -> str:
-    """Save image bytes to a temp file and return the path"""
+def _save_tmp(data: bytes, suffix: str = ".jpg") -> str:
     global temp_dir
-    if temp_dir is None or not os.path.exists(temp_dir):
-        temp_dir = tempfile.mkdtemp(prefix="got_ocr_")
-
-    import time
-    fname = os.path.join(temp_dir, f"img_{int(time.time()*1000000)}{suffix}")
+    if not temp_dir or not os.path.exists(temp_dir):
+        temp_dir = tempfile.mkdtemp(prefix="ocr_svc_")
+    fname = os.path.join(temp_dir, f"img_{int(time.time()*1_000_000)}{suffix}")
     with open(fname, "wb") as f:
-        f.write(image_bytes)
+        f.write(data)
     return fname
 
 
-def decode_image(image_data: str) -> bytes:
-    if "," in image_data:
-        image_data = image_data.split(",", 1)[1]
-    return base64.b64decode(image_data)
+def decode_image(data: str) -> bytes:
+    if "," in data:
+        data = data.split(",", 1)[1]
+    return base64.b64decode(data)
 
 
-def ocr_image(image_bytes: bytes, ocr_type: str = "ocr", high_res: bool = False) -> str:
-    """
-    Run GOT-OCR2.0 on image bytes.
-    ocr_type: 'ocr' (plain text) | 'format' (tables/formulas/markdown)
-    high_res: use chat_crop for high-resolution images
-    """
-    global ocr_engine
-
-    if ocr_engine is None:
-        return "Error: model not loaded"
-
-    try:
-        from PIL import Image
-
-        # Detect image format
-        img = Image.open(io.BytesIO(image_bytes))
-        fmt = img.format or "JPEG"
-        suffix = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp", "GIF": ".gif"}.get(fmt, ".jpg")
-
-        # Save to temp file (GOT-OCR2.0 requires file path)
-        img_path = save_image_bytes(image_bytes, suffix)
-
-        model = ocr_engine["model"]
-        tokenizer = ocr_engine["tokenizer"]
-
-        if high_res:
-            result = model.chat_crop(tokenizer, img_path, ocr_type=ocr_type)
-        else:
-            result = model.chat(tokenizer, img_path, ocr_type=ocr_type)
-
-        # Clean up temp file
-        try:
-            os.remove(img_path)
-        except Exception:
-            pass
-
-        return result if result else "[no text recognized]"
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return f"[OCR error] {str(e)}"
-
-
-def ocr_pdf(pdf_bytes: bytes, ocr_type: str = "ocr") -> dict:
-    """Convert PDF pages to images and OCR each page"""
+def ocr_pdf(pdf_bytes: bytes, mode: str = "general") -> dict:
     try:
         from pdf2image import convert_from_bytes
-        from pdf2image.exceptions import PDFInfoNotInstalledError
     except ImportError:
         return {"error": "pdf2image not installed. Run: pip install pdf2image", "pages": 0, "text": ""}
-
-    # Find poppler on Windows
-    poppler_path = os.environ.get("POPPLER_PATH")
-    if not poppler_path and sys.platform == "win32":
-        candidates = [
-            r"C:\poppler\Library\bin",
-            r"C:\poppler\bin",
-            r"C:\Program Files\poppler\bin",
-            str(Path(__file__).parent.parent.parent / "poppler" / "bin"),
-        ]
-        for c in candidates:
+    poppler = os.environ.get("POPPLER_PATH")
+    if not poppler and sys.platform == "win32":
+        for c in [r"C:\poppler\Library\bin", r"C:\poppler\bin", r"C:\Program Files\poppler\bin"]:
             if os.path.exists(c):
-                poppler_path = c
-                break
-
+                poppler = c; break
     try:
-        kwargs = {"dpi": 200}
-        if poppler_path:
-            kwargs["poppler_path"] = poppler_path
-
-        images = convert_from_bytes(pdf_bytes, **kwargs)
-        page_texts = []
-        for i, image in enumerate(images):
+        kw = {"dpi": 200}
+        if poppler: kw["poppler_path"] = poppler
+        images = convert_from_bytes(pdf_bytes, **kw)
+        texts = []
+        for i, img in enumerate(images):
             buf = io.BytesIO()
-            image.save(buf, format="JPEG", quality=95)
-            text = ocr_image(buf.getvalue(), ocr_type=ocr_type, high_res=True)
-            page_texts.append(f"=== Page {i + 1} ===\n{text}")
-            print(f"[INFO] PDF page {i + 1}/{len(images)} done", flush=True)
-
-        return {"pages": len(images), "text": "\n\n".join(page_texts)}
-
+            img.save(buf, format="JPEG", quality=95)
+            text = _do_ocr(buf.getvalue(), mode=mode, high_res=True)
+            texts.append(f"=== Page {i+1} ===\n{text}")
+            print(f"[INFO] PDF page {i+1}/{len(images)} done", flush=True)
+        return {"pages": len(images), "text": "\n\n".join(texts)}
     except Exception as e:
-        err_msg = str(e)
-        if "poppler" in err_msg.lower() or "pdfinfo" in err_msg.lower():
-            err_msg = (
-                "Poppler not found. Install for Windows:\n"
-                "1. Download https://github.com/oschwartz10612/poppler-windows/releases\n"
-                "2. Extract to C:\\poppler\\\n"
-                "3. Or set POPPLER_PATH env var"
-            )
-        return {"error": err_msg, "pages": 0, "text": ""}
+        msg = str(e)
+        if "poppler" in msg.lower():
+            msg = ("Poppler not found. Install:\n"
+                   "1. Download https://github.com/oschwartz10612/poppler-windows/releases\n"
+                   "2. Extract to C:\\poppler\\\n3. Or set POPPLER_PATH env var")
+        return {"error": msg, "pages": 0, "text": ""}
+
+
+def _do_ocr(image_bytes: bytes, mode: str = "general", high_res: bool = False) -> str:
+    """Route OCR to the currently loaded backend."""
+    if current_backend == "glm-ocr" and _glm_backend:
+        return _glm_backend.ocr(image_bytes, mode=mode)
+    if current_backend == "got-ocr" and _got_backend:
+        return _got_backend.ocr(image_bytes, mode=mode, high_res=high_res)
+    return "[Error] No OCR backend loaded"
 
 
 def extract_health_data(image_bytes: bytes) -> dict:
-    """Extract structured health data from image using formatted OCR"""
-    # Use 'format' type for better table/structured data recognition
-    text = ocr_image(image_bytes, ocr_type="format", high_res=True)
-    data = parse_health_data(text)
+    text = _do_ocr(image_bytes, mode="health-checkup", high_res=True)
+    data = _parse_health(text)
     data["raw_text"] = text
     return data
 
 
-def parse_health_data(text: str) -> dict:
+def _parse_health(text: str) -> dict:
     import re
     data = {}
-
-    def find_float(pattern):
-        m = re.search(pattern + r"\s*(\d+\.?\d*)", text, re.IGNORECASE)
-        if m:
-            try: return float(m.group(1))
-            except ValueError: pass
-        return None
-
-    def find_int(pattern):
-        m = re.search(pattern + r"\s*(\d+)", text, re.IGNORECASE)
-        if m:
-            try: return int(m.group(1))
-            except ValueError: pass
-        return None
-
-    def find_str(pattern):
-        m = re.search(pattern + r"\s*(.+?)(?:\s|$|,|\u3002)", text, re.IGNORECASE)
+    def ff(pat):
+        m = re.search(pat + r"\s*(\d+\.?\d*)", text, re.IGNORECASE)
+        return float(m.group(1)) if m else None
+    def fi(pat):
+        m = re.search(pat + r"\s*(\d+)", text, re.IGNORECASE)
+        return int(m.group(1)) if m else None
+    def fs(pat):
+        m = re.search(pat + r"\s*(.+?)(?:\s|$|,|\u3002)", text, re.IGNORECASE)
         return m.group(1).strip() if m else None
 
-    v = find_float(r"\u8eab\u9ad8[\uff1a:]");
-    if v: data["height"] = v
-    v = find_float(r"\u4f53\u91cd[\uff1a:]")
-    if v: data["weight"] = v
-    v = find_float(r"BMI[\uff1a:]")
-    if v: data["bmi"] = v
-    v = find_float(r"\u5de6\u773c[\u89c6\u529b\uff1a:]*")
-    if v: data["vision_left"] = v
-    v = find_float(r"\u53f3\u773c[\u89c6\u529b\uff1a:]*")
-    if v: data["vision_right"] = v
-    v = find_float(r"\u8840\u7ea2\u86cb\u767d[\uff1a:]")
-    if v: data["hemoglobin"] = v
-    v = find_int(r"\u5fc3\u7387[\uff1a:]")
-    if v: data["heart_rate"] = v
-    v = find_int(r"\u80ba\u6d3b\u91cf[\uff1a:]")
-    if v: data["lung_capacity"] = v
-    v = find_str(r"\u59d3\u540d[\uff1a:]")
-    if v: data["name"] = v
-    v = find_str(r"\u6027\u522b[\uff1a:]")
-    if v: data["gender"] = v
-    v = find_str(r"\u5b66\u53f7[\uff1a:]")
-    if v: data["student_id"] = v
-    v = find_str(r"\u5b66\u6821[\uff1a:]")
-    if v: data["school"] = v
-
+    for k, p in [("height","\u8eab\u9ad8[\uff1a:]"), ("weight","\u4f53\u91cd[\uff1a:]"),
+                 ("bmi","BMI[\uff1a:]"), ("vision_left","\u5de6\u773c[\u89c6\u529b\uff1a:]*"),
+                 ("vision_right","\u53f3\u773c[\u89c6\u529b\uff1a:]*"), ("hemoglobin","\u8840\u7ea2\u86cb\u767d[\uff1a:]")]:
+        v = ff(p)
+        if v: data[k] = v
+    for k, p in [("heart_rate","\u5fc3\u7387[\uff1a:]"), ("lung_capacity","\u80ba\u6d3b\u91cf[\uff1a:]")]:
+        v = fi(p)
+        if v: data[k] = v
+    for k, p in [("name","\u59d3\u540d[\uff1a:]"), ("gender","\u6027\u522b[\uff1a:]"),
+                 ("student_id","\u5b66\u53f7[\uff1a:]"), ("school","\u5b66\u6821[\uff1a:]")]:
+        v = fs(p)
+        if v: data[k] = v
     bp = re.search(r"\u8840\u538b[\uff1a:]\s*(\d+)[/\uff0f](\d+)", text)
     if bp:
-        try:
-            data["blood_pressure_systolic"] = int(bp.group(1))
-            data["blood_pressure_diastolic"] = int(bp.group(2))
-        except (ValueError, IndexError):
-            pass
-
+        data["blood_pressure_systolic"]  = int(bp.group(1))
+        data["blood_pressure_diastolic"] = int(bp.group(2))
     if data.get("height") and data.get("weight") and data["height"] > 0:
         h = data["height"] / 100
         data["bmi"] = round(data["weight"] / (h * h), 1)
-
-    allergy = re.search(r"\u8fc7\u654f[\u539f\u7269]?[\uff1a:]\s*(.+?)(?:\s|$|\u3002)", text)
-    if allergy:
-        data["allergies"] = [x.strip() for x in re.split(r"[,\uff0c\u3001]", allergy.group(1)) if x.strip()]
-
-    condition = re.search(r"\u65e2\u5f80[\u75c5\u75be]\u53f2[\uff1a:]\s*(.+?)(?:\s|$|\u3002)", text)
-    if condition:
-        data["conditions"] = [x.strip() for x in re.split(r"[,\uff0c\u3001]", condition.group(1)) if x.strip()]
-
     return data
 
 
+# ---------------------------------------------------------------------------
+# Load / Unload (run in background thread so /load returns immediately)
+# ---------------------------------------------------------------------------
+
+def _load_thread(backend_name: str):
+    global current_backend, model_loaded, loading_in_prog, _glm_backend, _got_backend
+    loading_in_prog = True
+    model_loaded = False
+    current_backend = None
+
+    try:
+        if backend_name == "glm-ocr":
+            if _glm_backend is None:
+                _glm_backend = GLMOCRBackend()
+            ok = _glm_backend.load()
+            if ok:
+                current_backend = "glm-ocr"
+                model_loaded = True
+        elif backend_name == "got-ocr":
+            if _got_backend is None:
+                _got_backend = GOTOCRBackend()
+            ok = _got_backend.load()
+            if ok:
+                current_backend = "got-ocr"
+                model_loaded = True
+        else:
+            update_progress("error", 0, f"Unknown backend: {backend_name}")
+    except Exception as e:
+        update_progress("error", 0, str(e))
+        import traceback; traceback.print_exc()
+    finally:
+        loading_in_prog = False
+
+
+def start_load(backend_name: str):
+    global loading_in_prog
+    if loading_in_prog:
+        return False, "Already loading"
+    t = threading.Thread(target=_load_thread, args=(backend_name,), daemon=True)
+    t.start()
+    return True, "Loading started"
+
+
+def do_unload():
+    global current_backend, model_loaded, loading_in_prog
+    if loading_in_prog:
+        return False, "Cannot unload while loading"
+    if current_backend == "glm-ocr" and _glm_backend:
+        _glm_backend.unload()
+    elif current_backend == "got-ocr" and _got_backend:
+        _got_backend.unload()
+    current_backend = None
+    model_loaded = False
+    if temp_dir and os.path.exists(temp_dir):
+        try:
+            import shutil; shutil.rmtree(temp_dir)
+        except Exception: pass
+    return True, "Model unloaded"
+
+
+# ---------------------------------------------------------------------------
+# HTTP Handler
+# ---------------------------------------------------------------------------
+
 class OCRHandler(BaseHTTPRequestHandler):
-    def log_message(self, format, *args):
-        pass
+    def log_message(self, fmt, *args): pass
 
     def send_json(self, status, data):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -358,141 +460,136 @@ class OCRHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             self.send_json(200, {
-                "status": "healthy" if model_loaded else "not_loaded",
+                "status": "loading" if loading_in_prog else ("loaded" if model_loaded else "not_loaded"),
                 "model_loaded": model_loaded,
+                "loading": loading_in_prog,
                 "progress": loading_progress,
-                "service": "got-ocr2",
-                "model_path": MODEL_PATH,
+                "backend": current_backend,
+                "backends": {
+                    "glm-ocr":  {"path": GLM_MODEL_PATH, "available": os.path.exists(GLM_MODEL_PATH)},
+                    "got-ocr":  {"path": GOT_MODEL_PATH, "available": os.path.exists(GOT_MODEL_PATH)},
+                },
             })
         else:
             self.send_json(200, {
-                "service": "GOT-OCR2.0 Service",
+                "service": "OCR Dual-Backend Service",
                 "model_loaded": model_loaded,
-                "model_path": MODEL_PATH,
+                "backend": current_backend,
                 "endpoints": {
-                    "POST /load": "Load model",
-                    "POST /unload": "Unload model",
-                    "POST /ocr": "OCR image (mode: ocr|format|handwriting|table, high_res: bool)",
-                    "POST /health-checkup": "Extract health data from image",
-                    "POST /pdf": "OCR PDF file",
-                }
+                    "POST /load":           '{"backend": "glm-ocr"|"got-ocr"}',
+                    "POST /unload":         "Unload current backend",
+                    "POST /ocr":            '{"image": "<b64>", "mode": "general|handwriting|table|format"}',
+                    "POST /health-checkup": '{"image": "<b64>"}',
+                    "POST /pdf":            '{"file": "<b64>"}',
+                },
             })
 
     def do_POST(self):
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(content_length)
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length)
 
-        # Load/unload don't need JSON body
         if self.path == "/load":
-            success = load_model()
-            if success:
-                self.send_json(200, {"success": True, "message": "Model loaded", "model_loaded": True})
+            try:
+                data = json.loads(body) if body else {}
+            except Exception:
+                data = {}
+            backend = data.get("backend", "got-ocr")
+            ok, msg = start_load(backend)
+            if ok:
+                self.send_json(200, {"success": True, "loading": True, "message": msg, "backend": backend})
             else:
-                self.send_json(500, {"success": False, "error": "Load failed", "progress": loading_progress})
+                self.send_json(409, {"success": False, "error": msg})
             return
 
         if self.path == "/unload":
-            unload_model()
-            self.send_json(200, {"success": True, "message": "Model unloaded", "model_loaded": False})
+            ok, msg = do_unload()
+            self.send_json(200 if ok else 409, {"success": ok, "message": msg, "model_loaded": False})
             return
 
         try:
             data = json.loads(body.decode("utf-8")) if body else {}
         except json.JSONDecodeError:
-            self.send_json(400, {"error": "Invalid JSON"})
-            return
+            self.send_json(400, {"error": "Invalid JSON"}); return
 
+        if loading_in_prog:
+            self.send_json(503, {"error": "Model is loading, please wait"}); return
         if not model_loaded:
-            self.send_json(503, {"error": "Model not loaded", "tip": "POST /load"})
-            return
+            self.send_json(503, {"error": "Model not loaded", "tip": "POST /load"}); return
 
         try:
             if self.path == "/ocr":
-                image_data = data.get("image", "")
-                if not image_data:
-                    self.send_json(400, {"error": "No image provided"})
-                    return
-
+                img_data = data.get("image", "")
+                if not img_data:
+                    self.send_json(400, {"error": "No image provided"}); return
                 mode = data.get("mode", "general")
                 high_res = data.get("high_res", False)
-
-                # Map mode to ocr_type
-                if mode in ("format", "table"):
-                    ocr_type = "format"
-                else:
-                    ocr_type = "ocr"  # plain text, handwriting, general
-
-                image_bytes = decode_image(image_data)
-                text = ocr_image(image_bytes, ocr_type=ocr_type, high_res=high_res)
-                self.send_json(200, {"success": True, "text": text})
+                img_bytes = decode_image(img_data)
+                text = _do_ocr(img_bytes, mode=mode, high_res=high_res)
+                self.send_json(200, {"success": True, "text": text, "backend": current_backend})
 
             elif self.path == "/health-checkup":
-                image_data = data.get("image", "")
-                if not image_data:
-                    self.send_json(400, {"error": "No image provided"})
-                    return
-                image_bytes = decode_image(image_data)
-                result = extract_health_data(image_bytes)
-                self.send_json(200, {"success": True, "data": result})
+                img_data = data.get("image", "")
+                if not img_data:
+                    self.send_json(400, {"error": "No image provided"}); return
+                result = extract_health_data(decode_image(img_data))
+                self.send_json(200, {"success": True, "data": result, "backend": current_backend})
 
             elif self.path == "/pdf":
                 file_data = data.get("file", "")
-                ocr_type = data.get("ocr_type", "format")
                 if not file_data:
-                    self.send_json(400, {"error": "No file provided"})
-                    return
+                    self.send_json(400, {"error": "No file provided"}); return
                 if "," in file_data:
                     file_data = file_data.split(",", 1)[1]
-                pdf_bytes = base64.b64decode(file_data)
-                result = ocr_pdf(pdf_bytes, ocr_type=ocr_type)
+                result = ocr_pdf(base64.b64decode(file_data), mode=data.get("mode", "general"))
                 if "error" in result:
                     self.send_json(500, result)
                 else:
-                    self.send_json(200, {"success": True, **result})
+                    self.send_json(200, {"success": True, **result, "backend": current_backend})
 
             else:
                 self.send_json(404, {"error": f"Unknown endpoint: {self.path}"})
 
         except Exception as e:
-            import traceback
-            traceback.print_exc()
+            import traceback; traceback.print_exc()
             self.send_json(500, {"error": str(e)})
 
 
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
 def signal_handler(sig, frame):
     print("\nShutting down...", flush=True)
-    unload_model()
+    do_unload()
     sys.exit(0)
 
 
 def main():
-    global MODEL_PATH
-
-    parser = argparse.ArgumentParser(description="GOT-OCR2.0 Service")
+    parser = argparse.ArgumentParser(description="OCR Dual-Backend Service")
     parser.add_argument("--port", type=int, default=8081)
-    parser.add_argument("--model-path", type=str, default=None)
-    parser.add_argument("--auto-load", action="store_true")
+    parser.add_argument("--auto-load", choices=["glm-ocr", "got-ocr"], default=None,
+                        help="Auto-load a backend on startup")
     args = parser.parse_args()
 
-    if args.model_path:
-        MODEL_PATH = args.model_path
-
-    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGINT,  signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    print(f"GOT-OCR2.0 Service | Port: {args.port} | Model: {MODEL_PATH}", flush=True)
+    print(f"OCR Dual-Backend Service | Port: {args.port}", flush=True)
+    print(f"  GLM-OCR  path: {GLM_MODEL_PATH} ({'found' if os.path.exists(GLM_MODEL_PATH) else 'NOT FOUND'})", flush=True)
+    print(f"  GOT-OCR2 path: {GOT_MODEL_PATH} ({'found' if os.path.exists(GOT_MODEL_PATH) else 'NOT FOUND'})", flush=True)
 
     if args.auto_load:
-        load_model()
+        start_load(args.auto_load)
 
     server = HTTPServer(("127.0.0.1", args.port), OCRHandler)
     print(f"Listening on http://127.0.0.1:{args.port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        unload_model()
+        do_unload()
         server.shutdown()
 
 
 if __name__ == "__main__":
     main()
+

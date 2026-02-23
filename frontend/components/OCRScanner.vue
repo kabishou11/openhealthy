@@ -48,6 +48,9 @@ const modelLoading = ref(false)
 const modelUrl = ref<string | null>(null)
 const modelLoadProgress = ref<{ stage: string; percent: number; message: string } | null>(null)
 const modelError = ref<string | null>(null)
+const currentBackend = ref<string | null>(null)   // currently loaded backend
+const selectedBackend = ref<'glm-ocr' | 'got-ocr'>('got-ocr')  // user selection
+const backendsInfo = ref<Record<string, { path: string; available: boolean }> | null>(null)
 
 // Poll status
 let statusPollTimer: ReturnType<typeof setInterval> | null = null
@@ -59,25 +62,26 @@ const refreshStatus = async () => {
     if (response.ok) {
       const data = await response.json()
       console.log('OCR Status update:', data)
-      // Always use the server's status - if model_loaded is not explicitly true, treat as false
       modelLoaded.value = data.modelLoaded === true
       modelLoading.value = data.loading === true
       modelUrl.value = data.url || null
+      currentBackend.value = data.backend || null
+      if (data.backends) backendsInfo.value = data.backends
       if (data.progress) {
         modelLoadProgress.value = data.progress
       }
-      console.log('modelLoaded:', modelLoaded.value, 'modelLoading:', modelLoading.value)
+      console.log('modelLoaded:', modelLoaded.value, 'modelLoading:', modelLoading.value, 'backend:', currentBackend.value)
     } else {
-      // Server responded but with error - reset to unloaded
       console.log('Status check failed, resetting to unloaded')
       modelLoaded.value = false
       modelLoading.value = false
+      currentBackend.value = null
     }
   } catch (e) {
     console.error('Failed to refresh OCR status:', e)
-    // Network/error - reset to unloaded
     modelLoaded.value = false
     modelLoading.value = false
+    currentBackend.value = null
   }
 }
 
@@ -93,7 +97,7 @@ const pollStatus = async () => {
 
 // Load GLM-OCR model
 const loadModel = async () => {
-  console.log('Loading GLM-OCR model...')
+  console.log('Loading OCR model, backend:', selectedBackend.value)
   modelError.value = null
   modelLoading.value = true
   modelLoadProgress.value = { stage: '准备中', percent: 0, message: '开始加载模型...' }
@@ -107,7 +111,7 @@ const loadModel = async () => {
     const response = await fetch(`${API_BASE}/api/v1/ocr/load`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ backend: selectedBackend.value }),
     })
 
     console.log('Load response status:', response.status)
@@ -460,18 +464,64 @@ const getVisionStatus = (vision: number) => {
       <h2 class="text-2xl font-bold text-gray-900">体检表OCR扫描</h2>
     </div>
 
-    <!-- GLM-OCR Model Section -->
+    <!-- OCR Model Section -->
     <div class="card mb-6 bg-gradient-to-r from-violet-50 to-indigo-50 border-violet-200">
       <h3 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
         <svg class="w-5 h-5 text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
         </svg>
-        GLM-OCR 模型
+        OCR 模型
       </h3>
+
+      <!-- Backend Selector (only when not loaded) -->
+      <div v-if="!modelLoaded && !modelLoading" class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-2">选择 OCR 引擎</label>
+        <div class="grid grid-cols-2 gap-3">
+          <button
+            @click="selectedBackend = 'got-ocr'"
+            :class="[
+              'p-3 rounded-xl border-2 text-left transition-all',
+              selectedBackend === 'got-ocr'
+                ? 'border-violet-500 bg-violet-50'
+                : 'border-gray-200 bg-white hover:border-violet-300'
+            ]"
+          >
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-base">🔬</span>
+              <span class="font-semibold text-sm text-gray-900">GOT-OCR2.0</span>
+              <span v-if="backendsInfo?.['got-ocr']?.available" class="text-xs text-green-600 bg-green-100 px-1.5 py-0.5 rounded-full">已下载</span>
+              <span v-else class="text-xs text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded-full">未下载</span>
+            </div>
+            <p class="text-xs text-gray-500">transformers 直接推理，无需 vLLM，CPU/GPU 均可</p>
+          </button>
+          <button
+            @click="selectedBackend = 'glm-ocr'"
+            :class="[
+              'p-3 rounded-xl border-2 text-left transition-all',
+              selectedBackend === 'glm-ocr'
+                ? 'border-violet-500 bg-violet-50'
+                : 'border-gray-200 bg-white hover:border-violet-300'
+            ]"
+          >
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-base">🧠</span>
+              <span class="font-semibold text-sm text-gray-900">GLM-OCR</span>
+              <span v-if="backendsInfo?.['glm-ocr']?.available" class="text-xs text-green-600 bg-green-100 px-1.5 py-0.5 rounded-full">已下载</span>
+              <span v-else class="text-xs text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded-full">未下载</span>
+            </div>
+            <p class="text-xs text-gray-500">智谱 AI，需要 vLLM + CUDA GPU，精度更高</p>
+          </button>
+        </div>
+      </div>
 
       <div class="flex items-center justify-between mb-4">
         <div>
-          <p class="text-sm text-gray-500">智谱 AI 开发的本地 OCR 模型，支持复杂表格识别</p>
+          <p v-if="!modelLoaded && !modelLoading" class="text-sm text-gray-500">
+            {{ selectedBackend === 'glm-ocr' ? '智谱 AI GLM-OCR，需要 vLLM 和 CUDA GPU' : 'GOT-OCR2.0，支持 CPU/GPU，无需 vLLM' }}
+          </p>
+          <p v-if="modelLoaded" class="text-sm text-gray-600">
+            当前引擎：<span class="font-semibold text-violet-700">{{ currentBackend === 'glm-ocr' ? 'GLM-OCR (vLLM)' : 'GOT-OCR2.0' }}</span>
+          </p>
           <p v-if="modelUrl" class="text-xs text-green-600 mt-1">服务: {{ modelUrl }}</p>
         </div>
         <div class="flex gap-2">
@@ -488,10 +538,10 @@ const getVisionStatus = (vision: number) => {
           <button
             v-if="modelLoaded && !modelLoading"
             @click="unloadModel"
-            class="px-6 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-xl font-medium transition-colors flex items-center gap-2"
+            class="px-6 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl font-medium transition-colors flex items-center gap-2"
           >
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
             </svg>
             卸载模型
           </button>
@@ -518,7 +568,7 @@ const getVisionStatus = (vision: number) => {
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
-        <span class="font-medium">GLM-OCR 已就绪</span>
+        <span class="font-medium">{{ currentBackend === 'glm-ocr' ? 'GLM-OCR' : 'GOT-OCR2.0' }} 已就绪</span>
       </div>
 
       <!-- Model Status - NOT LOADED -->
@@ -655,7 +705,7 @@ const getVisionStatus = (vision: number) => {
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
-            请先加载 GLM-OCR 模型
+          请先加载 OCR 模型
           </template>
           <template v-else>
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
