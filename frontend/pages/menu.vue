@@ -306,7 +306,7 @@ const generateMenu = async () => {
     }
 
     const config = useRuntimeConfig()
-    const apiBase = config.public.apiBase || 'http://localhost:3001'
+    const apiBase = ''
 
     try {
       const response = await fetch(`${apiBase}/api/v1/menu/generate`, {
@@ -360,9 +360,7 @@ const convertToMenuFormat = (weeklyPlan: any[]) => {
 const regenerateDay = async (day: string) => {
   regeneratingDay.value = day
   try {
-    const config = useRuntimeConfig()
-    const apiBase = config.public.apiBase || 'http://localhost:3001'
-    const response = await fetch(`${apiBase}/api/v1/menu/generate`, {
+    const response = await fetch(`/api/v1/menu/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -392,9 +390,7 @@ const regenerateDay = async (day: string) => {
 const regenerateMeal = async (day: string, mealType: string) => {
   regeneratingMeal.value = `${day}-${mealType}`
   try {
-    const config = useRuntimeConfig()
-    const apiBase = config.public.apiBase || 'http://localhost:3001'
-    const response = await fetch(`${apiBase}/api/v1/menu/random-meal?type=${encodeURIComponent(mealType)}`)
+    const response = await fetch(`/api/v1/menu/random-meal?type=${encodeURIComponent(mealType)}`)
     if (response.ok) {
       const newMeal = await response.json()
       weeklyMenu.value = weeklyMenu.value.map(d => {

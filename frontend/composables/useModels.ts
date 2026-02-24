@@ -13,8 +13,9 @@ export interface ModelInfo {
   status?: string
 }
 
+const API_BASE = '/api/v1'
+
 export function useModelsAPI() {
-  const config = useRuntimeConfig()
   const authStore = useAuthStore()
 
   const getAuthHeaders = (): HeadersInit => {
@@ -27,83 +28,52 @@ export function useModelsAPI() {
 
   // Get available models
   const getAvailableModels = async (): Promise<{ llm: ModelInfo[]; embedding: ModelInfo[] }> => {
-    const response = await fetch(`${config.public.apiBase}/models/available`, {
+    const response = await fetch(`${API_BASE}/models/available`, {
       headers: getAuthHeaders(),
     })
-
-    if (!response.ok) {
-      throw new Error('Failed to fetch models')
-    }
-
-    const data = await response.json()
-    return data
+    if (!response.ok) throw new Error('Failed to fetch models')
+    return response.json()
   }
 
   // Get current config
   const getModelConfig = async (): Promise<any> => {
-    const response = await fetch(`${config.public.apiBase}/models/config`, {
+    const response = await fetch(`${API_BASE}/models/config`, {
       headers: getAuthHeaders(),
     })
-
-    if (!response.ok) {
-      throw new Error('Failed to fetch model config')
-    }
-
-    const data = await response.json()
-    return data
+    if (!response.ok) throw new Error('Failed to fetch model config')
+    return response.json()
   }
 
   // Update LLM model
   const updateLLMModel = async (modelId: string): Promise<{ success: boolean }> => {
-    const response = await fetch(`${config.public.apiBase}/models/llm`, {
+    const response = await fetch(`${API_BASE}/models/llm`, {
       method: 'PUT',
-      headers: {
-        ...getAuthHeaders(),
-        'Content-Type': 'application/json',
-      },
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ modelId }),
     })
-
-    if (!response.ok) {
-      throw new Error('Failed to update LLM model')
-    }
-
+    if (!response.ok) throw new Error('Failed to update LLM model')
     return response.json()
   }
 
   // Update Embedding model
   const updateEmbeddingModel = async (modelId: string): Promise<{ success: boolean }> => {
-    const response = await fetch(`${config.public.apiBase}/models/embedding`, {
+    const response = await fetch(`${API_BASE}/models/embedding`, {
       method: 'PUT',
-      headers: {
-        ...getAuthHeaders(),
-        'Content-Type': 'application/json',
-      },
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ modelId }),
     })
-
-    if (!response.ok) {
-      throw new Error('Failed to update embedding model')
-    }
-
+    if (!response.ok) throw new Error('Failed to update embedding model')
     return response.json()
   }
 
   // Test model connection
   const testModel = async (modelId: string): Promise<{ success: boolean; message: string }> => {
-    const response = await fetch(`${config.public.apiBase}/models/test`, {
+    const response = await fetch(`${API_BASE}/models/test`, {
       method: 'POST',
-      headers: {
-        ...getAuthHeaders(),
-        'Content-Type': 'application/json',
-      },
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ modelId }),
     })
-
-    if (!response.ok) {
-      throw new Error('Failed to test model')
-    }
-
+    if (!response.ok) throw new Error('Failed to test model')
     return response.json()
   }
 
@@ -115,3 +85,4 @@ export function useModelsAPI() {
     testModel,
   }
 }
+

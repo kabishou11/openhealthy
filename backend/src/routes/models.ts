@@ -3,6 +3,18 @@
  */
 
 import { LLM_MODELS, EMBEDDING_MODELS, getModelScopeClient } from '../modelscope/client.js'
+import { config as appConfig } from '../config.js'
+
+// Runtime overrides (in-memory, reset on restart)
+const runtimeOverrides: { apiKey?: string; apiUrl?: string } = {}
+
+// Per-module model config
+const moduleModels: Record<string, string> = {
+  chat:       'Qwen/Qwen3-235B-A22B',
+  menu:       'Qwen/Qwen3-235B-A22B',
+  healthChat: 'Qwen/Qwen3-Next-80B-A3B-Instruct',
+  scan:       'Qwen/Qwen3-VL-235B-A22B-Instruct',
+}
 
 // Model configuration storage
 const modelConfig = {
@@ -23,15 +35,25 @@ const modelConfig = {
     hybridVectorWeight: 0.6,
     enableRerank: true,
   },
-  chunking: {
-    parentChunkSize: 1500,
-    childChunkSize: 400,
-    chunkOverlap: 100,
-  },
+}
+
+/** Get the effective API key (runtime override > env) */
+export function getEffectiveApiKey(): string {
+  return runtimeOverrides.apiKey || appConfig.modelScopeToken
+}
+
+/** Get the effective API URL (runtime override > env) */
+export function getEffectiveApiUrl(): string {
+  return runtimeOverrides.apiUrl || appConfig.modelScopeApiUrl
+}
+
+/** Get model for a specific module */
+export function getModuleModel(module: string): string {
+  return moduleModels[module] || modelConfig.llm.selected
 }
 
 export async function registerModelsRoutes(fastify: any) {
-  // Get available models — fetch from ModelScope API, fallback to hardcoded list
+  // Get available models
   fastify.get('/api/v1/models/available', async (_request: any, _reply: any) => {
     const client = getModelScopeClient()
     if (client.isConfigured()) {
@@ -43,21 +65,48 @@ export async function registerModelsRoutes(fastify: any) {
 
   // Get current configuration
   fastify.get('/api/v1/models/config', async (_request: any, _reply: any) => {
-    return modelConfig
+    return {
+      ...modelConfig,
+      modules: { ...moduleModels },
+      api: {
+        url: getEffectiveApiUrl(),
+        keyConfigured: !!getEffectiveApiKey(),
+        keyMasked: getEffectiveApiKey() ? '••••••••' + getEffectiveApiKey().slice(-4) : '',
+      },
+    }
   })
 
-  // Update LLM configuration — accepts both `selected` and `modelId`
+  // Update API settings
+  fastify.put('/api/v1/models/api', async (request: any, _reply: any) => {
+    const { apiKey, apiUrl } = request.body as { apiKey?: string; apiUrl?: string }
+    if (apiKey !== undefined && apiKey !== '') runtimeOverrides.apiKey = apiKey
+    if (apiUrl !== undefined && apiUrl !== '') runtimeOverrides.apiUrl = apiUrl
+    return { success: true, keyConfigured: !!getEffectiveApiKey(), url: getEffectiveApiUrl() }
+  })
+
+  // Update per-module model
+  fastify.put('/api/v1/models/module', async (request: any, _reply: any) => {
+    const { module, modelId } = request.body as { module: string; modelId: string }
+    if (module && modelId && module in moduleModels) moduleModels[module] = modelId
+    return { success: true, modules: { ...moduleModels } }
+  })
+
+  // Update LLM configuration
   fastify.put('/api/v1/models/llm', async (request: any, _reply: any) => {
     const body = request.body as any
     const selected = body.selected || body.modelId
-    if (selected) modelConfig.llm.selected = selected
+    if (selected) {
+      modelConfig.llm.selected = selected
+      moduleModels.chat = selected
+      moduleModels.menu = selected
+    }
     if (body.temperature !== undefined) modelConfig.llm.temperature = body.temperature
     if (body.maxTokens !== undefined) modelConfig.llm.maxTokens = body.maxTokens
     if (body.topP !== undefined) modelConfig.llm.topP = body.topP
     return modelConfig.llm
   })
 
-  // Update Embedding configuration — accepts both `selected` and `modelId`
+  // Update Embedding configuration
   fastify.put('/api/v1/models/embedding', async (request: any, _reply: any) => {
     const body = request.body as any
     const selected = body.selected || body.modelId
@@ -65,53 +114,46 @@ export async function registerModelsRoutes(fastify: any) {
     return modelConfig.embedding
   })
 
-  // Update Retrieval configuration
-  fastify.put('/api/v1/models/retrieval', async (request: any, _reply: any) => {
-    modelConfig.retrieval = { ...modelConfig.retrieval, ...request.body }
-    return modelConfig.retrieval
-  })
-
-  // Update Chunking configuration
-  fastify.put('/api/v1/models/chunking', async (request: any, _reply: any) => {
-    modelConfig.chunking = { ...modelConfig.chunking, ...request.body }
-    return modelConfig.chunking
-  })
-
   // Reset to defaults
   fastify.post('/api/v1/models/reset', async (_request: any, _reply: any) => {
-    modelConfig.llm = { selected: 'Qwen/Qwen3-8B', temperature: 0.7, maxTokens: 4096, topP: 0.9 }
+    modelConfig.llm = { selected: 'Qwen/Qwen3-235B-A22B', temperature: 0.7, maxTokens: 4096, topP: 0.9 }
     modelConfig.embedding = { selected: 'Qwen/Qwen3-Embedding-8B' }
-    modelConfig.retrieval = { topK: 5, scoreThreshold: 0.3, enableHybridSearch: true, hybridBM25Weight: 0.4, hybridVectorWeight: 0.6, enableRerank: true }
-    modelConfig.chunking = { parentChunkSize: 1500, childChunkSize: 400, chunkOverlap: 100 }
-    return { success: true, message: 'Configuration reset to defaults' }
+    moduleModels.chat = 'Qwen/Qwen3-235B-A22B'
+    moduleModels.menu = 'Qwen/Qwen3-235B-A22B'
+    moduleModels.healthChat = 'Qwen/Qwen3-Next-80B-A3B-Instruct'
+    moduleModels.scan = 'Qwen/Qwen3-VL-235B-A22B-Instruct'
+    return { success: true }
   })
 
-  // Test model connection — actually calls the API
+  // Test model connection
   fastify.post('/api/v1/models/test', async (request: any, _reply: any) => {
     const { modelId } = request.body as { modelId?: string }
-    const client = getModelScopeClient()
-
-    if (!client.isConfigured()) {
-      return { success: false, message: 'ModelScope API 未配置，请在 .env 中设置 MODELSCOPE_TOKEN' }
-    }
-
+    const apiKey = getEffectiveApiKey()
+    const apiUrl = getEffectiveApiUrl()
+    if (!apiKey) return { success: false, message: '未配置 API Key' }
     const testId = modelId || modelConfig.llm.selected
-    const isEmbedding = testId.toLowerCase().includes('embedding') || testId.toLowerCase().includes('embed')
+    const isEmbedding = testId.toLowerCase().includes('embedding')
     const start = Date.now()
-
     try {
+      const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` }
       if (isEmbedding) {
-        await client.getEmbedding('测试', testId)
-      } else {
-        await client.chatCompletion({
-          model: testId,
-          messages: [{ role: 'user', content: '你好' }],
-          maxTokens: 10,
+        const res = await fetch(`${apiUrl}/embeddings`, {
+          method: 'POST', headers,
+          body: JSON.stringify({ model: testId, input: '测试' }),
+          signal: AbortSignal.timeout(10000),
         })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      } else {
+        const res = await fetch(`${apiUrl}/chat/completions`, {
+          method: 'POST', headers,
+          body: JSON.stringify({ model: testId, messages: [{ role: 'user', content: '你好' }], max_tokens: 5 }),
+          signal: AbortSignal.timeout(15000),
+        })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
       }
-      return { success: true, message: `模型 ${testId} 连接成功`, latency: Date.now() - start }
+      return { success: true, message: `连接成功 (${Date.now() - start}ms)` }
     } catch (error: any) {
-      return { success: false, message: `连接失败: ${error.message}`, latency: Date.now() - start }
+      return { success: false, message: `连接失败: ${error.message}` }
     }
   })
 

@@ -62,6 +62,7 @@ export interface EmbeddingResponse {
 export const LLM_MODELS = [
   // Qwen3 系列
   { id: 'Qwen/Qwen3-235B-A22B', name: 'Qwen3-235B-A22B (MoE)', provider: 'Qwen', contextLength: '128K', description: '通义千问3 MoE旗舰模型，235B参数激活22B' },
+  { id: 'Qwen/Qwen3-Next-80B-A3B-Instruct', name: 'Qwen3-Next-80B-A3B', provider: 'Qwen', contextLength: '128K', description: '通义千问3 Next MoE模型，80B参数激活3B' },
   { id: 'Qwen/Qwen3-32B', name: 'Qwen3-32B', provider: 'Qwen', contextLength: '128K', description: '通义千问3 32B参数模型' },
   { id: 'Qwen/Qwen3-14B', name: 'Qwen3-14B', provider: 'Qwen', contextLength: '128K', description: '通义千问3 14B参数模型' },
   { id: 'Qwen/Qwen3-8B', name: 'Qwen3-8B', provider: 'Qwen', contextLength: '128K', description: '通义千问3 8B参数模型' },

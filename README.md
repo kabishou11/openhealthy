@@ -5,6 +5,173 @@
 ## 功能
 
 - **健康档案管理** — 扫描体检报告（OCR）自动提取指标，支持手动录入，异常指标高亮
+- **AI 医生对话** — 基于体检数据与 AI 进行针对性健康咨询（流式输出）
+- **个性化餐单** — 根据健康数据生成 7 天餐单，140+ 道食谱库，支持单日/单餐重新生成
+- **智能问答** — 营养健康知识问答，支持注入体检上下文
+- **营养分析** — 食物营养成分计算与摄入分析
+- **模型配置** — 统一管理 API Key、接口地址，各功能模块独立选择模型
+
+## 快速开始
+
+### 前置要求
+
+- Node.js >= 18
+- [ModelScope Token](https://www.modelscope.cn/my/token)（免费注册获取）
+
+### 1. 克隆 & 安装
+
+```bash
+git clone https://github.com/kabishou11/openhealthy.git
+cd openhealthy
+
+cd backend && npm install
+cd ../frontend && npm install
+```
+
+### 2. 配置环境变量
+
+```bash
+cd backend
+cp .env.example .env
+```
+
+编辑 `backend/.env`，填入必填项：
+
+```env
+MODELSCOPE_TOKEN=你的Token   # 必填，从 modelscope.cn/my/token 获取
+```
+
+> 也可以在启动后通过「模型配置」页面在线填写 API Key，无需重启。
+
+### 3. 启动服务
+
+**终端 1 — 后端（端口 3001）**
+```bash
+cd backend && npm run dev
+```
+
+**终端 2 — 前端（端口 3000）**
+```bash
+cd frontend && npm run dev
+```
+
+访问 http://localhost:3000
+
+---
+
+## 一键启动脚本
+
+**macOS / Linux**
+```bash
+chmod +x start.sh && ./start.sh
+```
+
+**Windows PowerShell**
+```powershell
+powershell -ExecutionPolicy Bypass -File start.ps1
+```
+
+---
+
+## 项目结构
+
+```
+openhealthy/
+├── backend/                  # Fastify API 服务
+│   ├── src/
+│   │   ├── routes/
+│   │   │   ├── models.ts             # 模型配置（统一 Key/URL/模块模型）
+│   │   │   ├── scan-health.ts        # OCR 体检扫描（VL 模型）
+│   │   │   ├── personal-health.ts    # 健康档案 CRUD
+│   │   │   ├── analyze-health.ts     # AI 医生对话（SSE 流式）
+│   │   │   ├── chat.ts               # 智能问答
+│   │   │   └── menu.ts               # 餐单生成
+│   │   ├── agents/                   # LangGraph AI Agents
+│   │   ├── models/db.ts              # SQLite 数据库
+│   │   └── config.ts                 # 统一配置
+│   ├── data/nutrimind.db             # SQLite 数据文件（本地）
+│   └── .env.example
+│
+├── frontend/                 # Nuxt 3 前端
+│   ├── pages/
+│   │   ├── health/
+│   │   │   ├── records.vue   # 健康档案列表 + AI 对话
+│   │   │   └── scan.vue      # 体检扫描入口
+│   │   ├── knowledge/
+│   │   │   ├── index.vue     # 智能问答
+│   │   │   └── models.vue    # 模型配置界面
+│   │   ├── menu.vue          # 餐单规划
+│   │   └── recipes/          # 食谱浏览
+│   ├── composables/
+│   │   └── useModels.ts      # 模型 API 封装
+│   └── nuxt.config.ts        # 含 devProxy 配置
+│
+├── start.sh                  # macOS/Linux 一键启动
+├── start.ps1                 # Windows 一键启动
+└── .env.example
+```
+
+---
+
+## 环境变量说明
+
+| 变量 | 必填 | 说明 |
+|------|------|------|
+| `MODELSCOPE_TOKEN` | ✅ | ModelScope API Token |
+| `PORT` | 否 | 后端端口，默认 3001 |
+| `NODE_ENV` | 否 | 环境，默认 development |
+
+所有 AI 功能统一使用 `MODELSCOPE_TOKEN`，也可在「模型配置」页面运行时修改（重启后恢复 .env 配置）。
+
+---
+
+## 使用的模型
+
+| 功能 | 默认模型 | 可配置 |
+|------|---------|--------|
+| 体检报告 OCR | `Qwen/Qwen3-VL-235B-A22B-Instruct` | ✅ |
+| AI 医生对话 | `Qwen/Qwen3-Next-80B-A3B-Instruct` | ✅ |
+| 智能问答 | `Qwen/Qwen3-235B-A22B` | ✅ |
+| 餐单生成 | `Qwen/Qwen3-235B-A22B` | ✅ |
+
+均通过 ModelScope API 在线调用，无需本地 GPU。各功能模型可在「模型配置」页面独立切换。
+
+---
+
+## 常见问题
+
+**Q: AI 对话返回"未配置 API Key"**
+→ 检查 `backend/.env` 中 `MODELSCOPE_TOKEN`，或在「模型配置」页面在线填写
+
+**Q: 健康档案页面空白**
+→ 确认后端已启动：`curl http://localhost:3001/health`
+
+**Q: 餐单无法重新生成**
+→ 确认后端正常运行，前端通过代理 `/api/v1/...` 访问后端
+
+---
+
+## 技术栈
+
+| 层 | 技术 |
+|----|------|
+| 后端 | Node.js 18 + Fastify + LangChain/LangGraph |
+| 数据库 | SQLite (better-sqlite3) |
+| 前端 | Nuxt 3 + Vue 3 + Tailwind CSS |
+| AI | ModelScope API (Qwen3 系列) |
+
+---
+
+## License
+
+MIT
+
+
+> AI 驱动的健康管理平台：体检报告扫描 → 健康档案 → AI 医生对话 → 个性化餐单
+
+## 功能
+
+- **健康档案管理** — 扫描体检报告（OCR）自动提取指标，支持手动录入，异常指标高亮
 - **AI 医生对话** — 基于体检数据与 AI 进行针对性健康咨询（Qwen3 流式输出）
 - **个性化餐单** — 根据健康数据生成 7 天餐单，140+ 道食谱库
 - **智能问答** — 营养健康知识问答，支持注入体检上下文

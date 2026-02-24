@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { db } from '../models/db.js'
-import { config } from '../config.js'
+import { getEffectiveApiKey, getEffectiveApiUrl, getModuleModel } from './models.js'
 
 export async function registerAnalyzeHealthRoutes(app: FastifyInstance) {
   // 档案对话接口：基于某条健康档案与 AI 医生对话（流式）
@@ -24,9 +24,9 @@ export async function registerAnalyzeHealthRoutes(app: FastifyInstance) {
       return reply.status(404).send({ error: '档案不存在' })
     }
 
-    const apiKey = config.modelScopeToken
-    const apiBase = config.modelScopeApiUrl
-    const model = 'Qwen/Qwen3-Next-80B-A3B-Instruct'
+    const apiKey = getEffectiveApiKey()
+    const apiBase = getEffectiveApiUrl()
+    const model = getModuleModel('healthChat')
 
     if (!apiKey) {
       return reply.status(500).send({ error: '未配置 MODELSCOPE_TOKEN' })

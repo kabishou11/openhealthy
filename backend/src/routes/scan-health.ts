@@ -1,6 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-
-const VL_MODEL = 'Qwen/Qwen3-VL-235B-A22B-Instruct';
+import { getEffectiveApiKey, getEffectiveApiUrl, getModuleModel } from './models.js';
 
 const SYSTEM_PROMPT = `你是专业的健康体检报告分析助手。分析图片中的体检报告或健康数据，严格按以下 JSON 格式返回，不要有任何额外文字或 markdown 代码块：
 
@@ -43,8 +42,9 @@ export async function registerScanHealthRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: '缺少图片数据' });
     }
 
-    const apiKey = process.env.MODELSCOPE_TOKEN || process.env.OPENAI_API_KEY || '';
-    const apiBase = process.env.MODELSCOPE_API_URL || 'https://api-inference.modelscope.cn/v1';
+    const apiKey = getEffectiveApiKey();
+    const apiBase = getEffectiveApiUrl();
+    const VL_MODEL = getModuleModel('scan');
 
     if (!apiKey) {
       return reply.status(500).send({ error: '未配置 MODELSCOPE_TOKEN' });

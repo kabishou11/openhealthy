@@ -14,6 +14,7 @@ import { SystemMessage, HumanMessage, AIMessage, BaseMessage } from '@langchain/
 import { z } from 'zod';
 import { redisClient } from '../utils/redis.js';
 import { config } from '../config.js';
+import { getEffectiveApiKey, getEffectiveApiUrl, getModuleModel } from '../routes/models.js';
 
 // ==================== State Definition ====================
 
@@ -175,10 +176,10 @@ export function setSelectedModel(model: string) {
 }
 
 // Direct API call helper for ModelScope (bypasses LangChain issues)
-async function callModelScopeAPI(messages: { role: string; content: string }[], maxTokens: number = 500): Promise<string> {
-  const apiKey = process.env.MODELSCOPE_TOKEN || process.env.OPENAI_API_KEY || '';
-  const apiBase = process.env.MODELSCOPE_API_URL || 'https://api-inference.modelscope.cn/v1';
-  const model = selectedModel;
+async function callModelScopeAPI(messages: { role: string; content: string }[], maxTokens: number = 500, module: string = 'chat'): Promise<string> {
+  const apiKey = getEffectiveApiKey();
+  const apiBase = getEffectiveApiUrl();
+  const model = getModuleModel(module as any);
 
   if (!apiKey) {
     throw new Error('API key not configured');
@@ -932,7 +933,7 @@ ${profile ? `用户偏好: ${profile.tastePreferences}, 饮食限制: ${profile.
       { role: 'user', content: prompt },
     ];
 
-    const result = await callModelScopeAPI(messages, 600);
+    const result = await callModelScopeAPI(messages, 600, 'menu');
 
     return {
       type: 'menu_planning',
