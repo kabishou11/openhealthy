@@ -151,7 +151,6 @@ const generateMenu = async () => {
 }
 
 onMounted(() => {
-  authStore.init()
   selectedGroup.value = defaultGroup.value
   try {
     const raw = sessionStorage.getItem('healthContext')

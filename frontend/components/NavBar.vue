@@ -30,7 +30,7 @@ const knowledgeSubItems = computed(() => {
 const menuSubItems = computed(() => {
   const items: { name: string; path: string; icon: string }[] = []
   // Personal meal plan - for personal users and unauthenticated
-  if (!authStore.isAuthenticated || !authStore.canManageCafeteria) {
+  if (!authStore.isAuthenticated || !authStore.canManageCafeteria || authStore.isAdmin) {
     items.push({ name: '个人餐单', path: '/menu', icon: '📅' })
   }
   // Cafeteria plan - for cafeteria staff and school admins

@@ -152,8 +152,7 @@ export const useAuthStore = defineStore('auth', {
         localStorage.removeItem('user');
       }
 
-      const router = useRouter();
-      router.push('/login');
+      navigateTo('/login');
     },
 
     // Get role display name

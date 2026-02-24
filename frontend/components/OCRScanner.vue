@@ -10,7 +10,7 @@ const emit = defineEmits<{
   (e: 'cancel'): void
 }>()
 
-const API = 'http://127.0.0.1:3001'
+const API = ''
 
 // ── Core state ──
 const image       = ref<string | null>(null)

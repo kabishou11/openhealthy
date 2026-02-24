@@ -15,7 +15,8 @@ export function useAuthGuard(allowedRoles?: string[]) {
       return false
     }
     if (allowedRoles && allowedRoles.length > 0) {
-      if (!allowedRoles.includes(authStore.userRole)) {
+      // ADMIN bypasses all role restrictions
+      if (!authStore.isAdmin && !allowedRoles.includes(authStore.userRole)) {
         router.push('/dashboard')
         return false
       }
