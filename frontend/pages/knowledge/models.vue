@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { useModelsAPI } from '~/composables/useModels'
+import { useAuthGuard } from '~/composables/useAuthGuard'
 
 useSeoMeta({ title: '模型配置 - NutriMind' })
+
+useAuthGuard() // require login
 
 const { getAvailableModels, getModelConfig, updateLLMModel, updateEmbeddingModel, testModel } = useModelsAPI()
 

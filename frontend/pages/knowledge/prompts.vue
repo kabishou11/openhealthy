@@ -1,8 +1,12 @@
 <script setup lang="ts">
+import { useAuthGuard } from '~/composables/useAuthGuard'
+
 useSeoMeta({
   title: '提示词管理 - NutriMind',
   description: '管理系统提示词模板、Few-shot示例',
 })
+
+useAuthGuard() // require login
 
 // Prompt types
 type PromptType = 'system' | 'user' | 'fewshot' | 'context'

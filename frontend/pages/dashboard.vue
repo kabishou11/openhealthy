@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useAuthStore } from '~/stores/auth'
+import { useAuthGuard } from '~/composables/useAuthGuard'
 import { useDashboardAPI } from '~/composables/useDashboard'
 import { useStudentsAPI } from '~/composables/useStudents'
 
@@ -44,7 +45,7 @@ interface DailyMenu {
 }
 
 const router = useRouter()
-const authStore = useAuthStore()
+const { authStore } = useAuthGuard()
 const { getLinkedStudents, getStudents } = useStudentsAPI()
 const { getTodayMenu } = useDashboardAPI()
 
@@ -68,6 +69,64 @@ const getRoleName = (role: string): string => {
   return roles[role] || role
 }
 
+// Role-specific quick actions
+const quickActions = computed(() => {
+  const role = user.value?.role || ''
+  const base = [
+    { icon: '❤️', label: '健康档案', desc: '查看体检记录', path: '/health/records', color: 'emerald' },
+    { icon: '💬', label: '智能问答', desc: '营养知识问答', path: '/knowledge', color: 'violet' },
+  ]
+  if (role === 'CAFETERIA_MANAGER' || role === 'CAFETERIA_COOK') {
+    return [
+      { icon: '🍽️', label: '食堂餐单', desc: '管理本周菜单', path: '/menu/cafeteria', color: 'orange' },
+      { icon: '📊', label: '食堂管理', desc: '菜品与统计', path: '/admin/cafeteria', color: 'amber' },
+      { icon: '🛒', label: '采购清单', desc: '本周食材清单', path: '/menu/shopping', color: 'blue' },
+      { icon: '💬', label: '智能问答', desc: '营养知识问答', path: '/knowledge', color: 'violet' },
+    ]
+  }
+  if (role === 'SCHOOL_ADMIN') {
+    return [
+      { icon: '🏫', label: '学校管理', desc: '班级与学生', path: '/admin/school', color: 'purple' },
+      { icon: '👨‍🎓', label: '学生管理', desc: '健康档案管理', path: '/admin/students', color: 'blue' },
+      { icon: '🍽️', label: '食堂餐单', desc: '查看本周菜单', path: '/menu/cafeteria', color: 'orange' },
+      { icon: '💬', label: '智能问答', desc: '营养知识问答', path: '/knowledge', color: 'violet' },
+    ]
+  }
+  if (role === 'DOCTOR' || role === 'INSTITUTION') {
+    return [
+      { icon: '❤️', label: '健康档案', desc: '查看体检记录', path: '/health/records', color: 'emerald' },
+      { icon: '📋', label: '餐单计划', desc: '个性化配餐', path: '/menu', color: 'amber' },
+      { icon: '📚', label: '知识库', desc: '管理营养知识', path: '/knowledge/manage', color: 'indigo' },
+      { icon: '💬', label: '智能问答', desc: '营养知识问答', path: '/knowledge', color: 'violet' },
+    ]
+  }
+  if (role === 'STUDENT') {
+    return [
+      { icon: '❤️', label: '健康档案', desc: '我的体检记录', path: '/health/records', color: 'emerald' },
+      { icon: '📅', label: '我的餐单', desc: '学生营养餐单', path: '/menu', color: 'amber' },
+      { icon: '🍳', label: '食谱浏览', desc: '健康食谱推荐', path: '/recipes', color: 'rose' },
+      { icon: '💬', label: '智能问答', desc: '营养知识问答', path: '/knowledge', color: 'violet' },
+    ]
+  }
+  // PARENT / default
+  return [
+    ...base,
+    { icon: '📅', label: '餐单计划', desc: '查看健康餐单', path: '/menu', color: 'amber' },
+    { icon: '🍳', label: '食谱浏览', desc: '查看健康食谱', path: '/recipes', color: 'rose' },
+  ]
+})
+
+const actionBg: Record<string, string> = {
+  emerald: 'bg-emerald-100 text-emerald-600',
+  violet: 'bg-violet-100 text-violet-600',
+  orange: 'bg-orange-100 text-orange-600',
+  amber: 'bg-amber-100 text-amber-600',
+  blue: 'bg-blue-100 text-blue-600',
+  purple: 'bg-purple-100 text-purple-600',
+  indigo: 'bg-indigo-100 text-indigo-600',
+  rose: 'bg-rose-100 text-rose-600',
+}
+
 // Get BMI category
 const getBMICategory = (bmi: number | undefined): string => {
   if (!bmi) return '未设置'
@@ -85,7 +144,6 @@ const navigateTo = (path: string) => {
 // Load dashboard data
 const loadDashboardData = async () => {
   try {
-    // Get user from auth store
     const storedUser = localStorage.getItem('user')
     if (storedUser) {
       user.value = JSON.parse(storedUser)
@@ -124,12 +182,8 @@ const handleLogout = () => {
 }
 
 onMounted(() => {
-  const storedUser = localStorage.getItem('user')
-  if (!storedUser) {
-    router.push('/login')
-    return
-  }
-  user.value = JSON.parse(storedUser)
+  const storedUser = authStore.user || JSON.parse(localStorage.getItem('user') || 'null')
+  if (storedUser) user.value = storedUser
   loadDashboardData()
 })
 </script>
@@ -148,7 +202,12 @@ onMounted(() => {
             </div>
             <div>
               <h1 class="text-2xl font-bold">{{ user?.name }}</h1>
-              <p class="text-emerald-100">{{ getRoleName(user?.role || '') }}</p>
+              <div class="flex items-center gap-2 mt-1">
+                <span class="text-sm px-2.5 py-0.5 rounded-full font-medium bg-white/20 text-white">
+                  {{ getRoleName(user?.role || '') }}
+                </span>
+                <span class="text-emerald-100 text-sm">{{ user?.phone }}</span>
+              </div>
             </div>
           </div>
           <button
@@ -162,58 +221,20 @@ onMounted(() => {
     </div>
 
     <div class="container mx-auto px-4 py-8">
-      <!-- Quick Actions -->
+      <!-- Quick Actions (role-based) -->
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <button
-          @click="navigateTo('/health')"
-          class="bg-white rounded-2xl p-6 shadow-sm hover:shadow-md transition-all text-left border border-gray-100"
+          v-for="action in quickActions"
+          :key="action.path"
+          @click="navigateTo(action.path)"
+          class="bg-white rounded-2xl p-5 shadow-sm hover:shadow-md transition-all text-left border border-gray-100"
         >
-          <div class="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center mb-3">
-            <svg class="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-            </svg>
+          <div class="w-11 h-11 rounded-xl flex items-center justify-center mb-3 text-xl"
+            :class="actionBg[action.color]">
+            {{ action.icon }}
           </div>
-          <h3 class="font-semibold text-gray-900">健康档案</h3>
-          <p class="text-sm text-gray-500 mt-1">管理健康数据</p>
-        </button>
-
-        <button
-          @click="navigateTo('/menu')"
-          class="bg-white rounded-2xl p-6 shadow-sm hover:shadow-md transition-all text-left border border-gray-100"
-        >
-          <div class="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center mb-3">
-            <svg class="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-            </svg>
-          </div>
-          <h3 class="font-semibold text-gray-900">餐单计划</h3>
-          <p class="text-sm text-gray-500 mt-1">查看健康餐单</p>
-        </button>
-
-        <button
-          @click="navigateTo('/recipes')"
-          class="bg-white rounded-2xl p-6 shadow-sm hover:shadow-md transition-all text-left border border-gray-100"
-        >
-          <div class="w-12 h-12 bg-rose-100 rounded-xl flex items-center justify-center mb-3">
-            <svg class="w-6 h-6 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-            </svg>
-          </div>
-          <h3 class="font-semibold text-gray-900">食谱浏览</h3>
-          <p class="text-sm text-gray-500 mt-1">查看健康食谱</p>
-        </button>
-
-        <button
-          @click="navigateTo('/knowledge')"
-          class="bg-white rounded-2xl p-6 shadow-sm hover:shadow-md transition-all text-left border border-gray-100"
-        >
-          <div class="w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center mb-3">
-            <svg class="w-6 h-6 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.657-1.79 3-4 3a3 3 0 00-2.883 2c-1.37 0-2.698.524-3.608 1.38l-.656.164a4.503 4.503 0 00-2.044 2.602c-1.423.69-2.29 1.7-2.29 3.122 0 1.406 1.11 2.554 2.63 2.88a5.4 5.4 0 01.81 1.25c.12.413.38.79.74 1.1a8.99 8.99 0 003.428 1.62c2.058.546 3.49.546 5.544 0a9.005 9.005 0 003.42-1.62c.36-.31.62-.687.74-1.1a3.5 3.5 0 00.81-1.25c1.52-.326 2.63-1.474 2.63-2.88 0-1.422-.867-2.432-2.29-3.122a4.503 4.503 0 00-2.044-2.602l-.656-.164a4.5 4.5 0 00-3.608-1.38 3 3 0 00-3.772 2c-1.742.657-3.332.477-4.5-1.253" />
-            </svg>
-          </div>
-          <h3 class="font-semibold text-gray-900">智能问答</h3>
-          <p class="text-sm text-gray-500 mt-1">营养知识问答</p>
+          <h3 class="font-semibold text-gray-900 text-sm">{{ action.label }}</h3>
+          <p class="text-xs text-gray-500 mt-0.5">{{ action.desc }}</p>
         </button>
       </div>
 

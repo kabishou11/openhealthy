@@ -98,8 +98,10 @@ const save = async () => {
   try {
     const sd: Record<string, string> = {}
     for (const g of groups.value) for (const i of g.items) if (i.key) sd[i.key] = i.value + (i.unit ? ` ${i.unit}` : '')
+    const token = import.meta.client ? localStorage.getItem('token') : null
+    const authHeader = token ? { 'Authorization': `Bearer ${token}` } : {}
     const res = await fetch(`${API}/api/v1/personal-health`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeader },
       body: JSON.stringify({ rawText: rawText.value || '', structuredData: sd, groups: groups.value, scanDate: new Date().toISOString().split('T')[0], title: title.value || undefined, summary: summary.value || undefined, imageData: image.value || undefined }),
     })
     const d = await res.json()

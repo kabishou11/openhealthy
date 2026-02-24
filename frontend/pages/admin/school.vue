@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useAuthStore } from '~/stores/auth'
+import { useAuthGuard } from '~/composables/useAuthGuard'
 import { useSchoolsAPI } from '~/composables/useSchools'
 import { useStudentsAPI } from '~/composables/useStudents'
 
@@ -9,25 +9,12 @@ useSeoMeta({
 })
 
 const router = useRouter()
-const authStore = useAuthStore()
+const { authStore } = useAuthGuard(['SCHOOL_ADMIN', 'ADMIN'])
 const { getSchools, getClasses } = useSchoolsAPI()
 const { getBMIStats, getStudents } = useStudentsAPI()
 
 const activeTab = ref('overview')
 const loading = ref(false)
-
-// Check admin access
-onMounted(() => {
-  const user = localStorage.getItem('user')
-  if (user) {
-    const userData = JSON.parse(user)
-    if (!['SCHOOL_ADMIN', 'ADMIN'].includes(userData.role)) {
-      router.push('/dashboard')
-    }
-  } else {
-    router.push('/login')
-  }
-})
 
 // School data
 const schools = ref<any[]>([])

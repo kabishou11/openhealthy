@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useAuthStore } from '~/stores/auth'
+import { useAuthGuard } from '~/composables/useAuthGuard'
 import { useHealthAPI } from '~/composables/useHealth'
 import { useStudentsAPI } from '~/composables/useStudents'
 
@@ -10,7 +10,7 @@ useSeoMeta({
 
 const route = useRoute()
 const router = useRouter()
-const authStore = useAuthStore()
+const { authStore } = useAuthGuard(['PARENT', 'DOCTOR', 'SCHOOL_ADMIN', 'ADMIN', 'INSTITUTION'])
 const { getHealthSummary, getHealthRecords, getHealthTrend, calculateBMI, getBMICategory, calculateNutritionNeeds } = useHealthAPI()
 const { getStudent } = useStudentsAPI()
 

@@ -1,11 +1,13 @@
 <script setup lang="ts">
+import { useAuthStore } from '~/stores/auth'
+
 useSeoMeta({
   title: '登录 - NutriMind',
   description: '登录 NutriMind 营养健康平台',
 })
 
 const router = useRouter()
-const config = useRuntimeConfig()
+const authStore = useAuthStore()
 
 const phone = ref('')
 const password = ref('')
@@ -13,39 +15,55 @@ const loading = ref(false)
 const error = ref('')
 const showPassword = ref(false)
 
+// Demo accounts for quick role switching
+const demoAccounts = [
+  { role: 'PARENT', label: '家长', icon: '👨‍👩‍👧', color: 'indigo', phone: '13800138001', password: '123456' },
+  { role: 'STUDENT', label: '学生', icon: '👨‍🎓', color: 'green', phone: '13800138002', password: '123456' },
+  { role: 'CAFETERIA_MANAGER', label: '食堂管理员', icon: '🍽️', color: 'orange', phone: '13800138003', password: '123456' },
+  { role: 'SCHOOL_ADMIN', label: '学校管理员', icon: '🏫', color: 'purple', phone: '13800138004', password: '123456' },
+  { role: 'DOCTOR', label: '医生', icon: '👨‍⚕️', color: 'blue', phone: '13800138005', password: '123456' },
+  { role: 'ADMIN', label: '超级管理员', icon: '⚙️', color: 'red', phone: '13800138000', password: '123456' },
+]
+
+const demoBadgeClass: Record<string, string> = {
+  indigo: 'bg-indigo-50 border-indigo-200 hover:bg-indigo-100 text-indigo-700',
+  green: 'bg-green-50 border-green-200 hover:bg-green-100 text-green-700',
+  orange: 'bg-orange-50 border-orange-200 hover:bg-orange-100 text-orange-700',
+  purple: 'bg-purple-50 border-purple-200 hover:bg-purple-100 text-purple-700',
+  blue: 'bg-blue-50 border-blue-200 hover:bg-blue-100 text-blue-700',
+  red: 'bg-red-50 border-red-200 hover:bg-red-100 text-red-700',
+}
+
+const fillDemo = (account: typeof demoAccounts[0]) => {
+  phone.value = account.phone
+  password.value = account.password
+}
+
 const handleLogin = async () => {
   if (!phone.value || !password.value) {
     error.value = '请输入手机号和密码'
     return
   }
-
   loading.value = true
   error.value = ''
-
   try {
-    const apiBase = config.public.apiBase || 'http://localhost:3001/api/v1'
-    const response = await fetch(`${apiBase}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        phone: phone.value,
-        password: password.value,
-      }),
-    })
-
-    const data = await response.json()
-
-    if (!response.ok) {
-      throw new Error(data.message || '登录失败')
+    const result = await authStore.login(phone.value, password.value)
+    if (result.success) {
+      router.push('/dashboard')
+    } else {
+      // Demo mode: create a mock user based on phone
+      const demo = demoAccounts.find(d => d.phone === phone.value)
+      if (demo && password.value === '123456') {
+        const mockUser = { id: demo.phone, phone: demo.phone, name: `演示${demo.label}`, role: demo.role }
+        localStorage.setItem('token', 'demo-token-' + demo.role)
+        localStorage.setItem('user', JSON.stringify(mockUser))
+        authStore.token = 'demo-token-' + demo.role
+        authStore.user = mockUser
+        router.push('/dashboard')
+      } else {
+        error.value = result.error || '登录失败'
+      }
     }
-
-    // Store token and user info
-    localStorage.setItem('token', data.data.token)
-    localStorage.setItem('refreshToken', data.data.refreshToken)
-    localStorage.setItem('user', JSON.stringify(data.data.user))
-
-    // Navigate to dashboard
-    router.push('/dashboard')
   } catch (err: any) {
     error.value = err.message || '登录失败，请检查网络'
   } finally {
@@ -53,20 +71,9 @@ const handleLogin = async () => {
   }
 }
 
-const goToRegister = () => {
-  router.push('/register')
-}
-
-const goToHome = () => {
-  router.push('/')
-}
-
-// Check if already logged in
 onMounted(() => {
-  const token = localStorage.getItem('token')
-  if (token) {
-    router.push('/dashboard')
-  }
+  authStore.init()
+  if (authStore.isAuthenticated) router.push('/dashboard')
 })
 </script>
 
@@ -158,34 +165,37 @@ onMounted(() => {
         </form>
 
         <!-- Register Link -->
-        <div class="mt-6 text-center">
-          <p class="text-gray-500">
+        <div class="mt-5 text-center">
+          <p class="text-gray-500 text-sm">
             还没有账号？
-            <button @click="goToRegister" class="text-emerald-600 hover:text-emerald-700 font-medium">
-              立即注册
-            </button>
+            <NuxtLink to="/register" class="text-emerald-600 hover:text-emerald-700 font-medium">立即注册</NuxtLink>
           </p>
         </div>
 
         <!-- Demo Account -->
-        <div class="mt-6 p-4 bg-gray-50 rounded-xl">
-          <p class="text-sm text-gray-500 text-center">
-            演示账号：13800138000 / 123456
-          </p>
+        <div class="mt-5 p-4 bg-gray-50 rounded-xl">
+          <p class="text-xs font-medium text-gray-500 mb-3 text-center">演示账号 — 点击快速填入</p>
+          <div class="grid grid-cols-3 gap-2">
+            <button
+              v-for="demo in demoAccounts"
+              :key="demo.role"
+              type="button"
+              @click="fillDemo(demo)"
+              class="flex flex-col items-center gap-1 p-2 rounded-xl border text-xs font-medium transition-all"
+              :class="demoBadgeClass[demo.color]"
+            >
+              <span class="text-lg">{{ demo.icon }}</span>
+              <span>{{ demo.label }}</span>
+            </button>
+          </div>
+          <p class="text-xs text-gray-400 text-center mt-2">密码均为 123456</p>
         </div>
       </div>
 
       <!-- Footer -->
-      <div class="mt-6 flex flex-col gap-3">
-        <p class="text-center text-gray-400 text-sm">
-          Powered by AI · 基于专业知识库提供健康建议
-        </p>
-        <button
-          @click="goToHome"
-          class="text-center text-gray-400 hover:text-emerald-600 text-sm transition-colors"
-        >
-          返回首页
-        </button>
+      <div class="mt-5 text-center space-y-2">
+        <p class="text-gray-400 text-xs">Powered by AI · 基于专业知识库提供健康建议</p>
+        <NuxtLink to="/" class="text-gray-400 hover:text-emerald-600 text-xs transition-colors">返回首页</NuxtLink>
       </div>
     </div>
   </div>

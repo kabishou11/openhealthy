@@ -28,6 +28,33 @@ export const useAuthStore = defineStore('auth', {
     isAuthenticated: (state) => !!state.token,
     userRole: (state) => state.user?.role || '',
     userName: (state) => state.user?.name || '',
+    // Role checks
+    isAdmin: (state) => state.user?.role === 'ADMIN',
+    isSchoolAdmin: (state) => state.user?.role === 'SCHOOL_ADMIN',
+    isCafeteriaManager: (state) => state.user?.role === 'CAFETERIA_MANAGER',
+    isCafeteriaCook: (state) => state.user?.role === 'CAFETERIA_COOK',
+    isDoctor: (state) => state.user?.role === 'DOCTOR',
+    isStudent: (state) => state.user?.role === 'STUDENT',
+    isParent: (state) => state.user?.role === 'PARENT',
+    isInstitution: (state) => state.user?.role === 'INSTITUTION',
+    // Group checks
+    isStaff: (state) => ['ADMIN', 'SCHOOL_ADMIN', 'CAFETERIA_MANAGER', 'CAFETERIA_COOK', 'DOCTOR', 'INSTITUTION'].includes(state.user?.role || ''),
+    canManageCafeteria: (state) => ['ADMIN', 'CAFETERIA_MANAGER'].includes(state.user?.role || ''),
+    canViewSchool: (state) => ['ADMIN', 'SCHOOL_ADMIN', 'CAFETERIA_MANAGER', 'CAFETERIA_COOK'].includes(state.user?.role || ''),
+    // Role badge color
+    roleBadgeColor: (state) => {
+      const colors: Record<string, string> = {
+        ADMIN: 'bg-red-100 text-red-700',
+        SCHOOL_ADMIN: 'bg-purple-100 text-purple-700',
+        CAFETERIA_MANAGER: 'bg-orange-100 text-orange-700',
+        CAFETERIA_COOK: 'bg-amber-100 text-amber-700',
+        DOCTOR: 'bg-blue-100 text-blue-700',
+        INSTITUTION: 'bg-teal-100 text-teal-700',
+        STUDENT: 'bg-green-100 text-green-700',
+        PARENT: 'bg-indigo-100 text-indigo-700',
+      }
+      return colors[state.user?.role || ''] || 'bg-gray-100 text-gray-700'
+    },
   },
 
   actions: {

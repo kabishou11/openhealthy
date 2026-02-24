@@ -1,7 +1,7 @@
 # NutriMind AI Nutrition Assistant - Project Documentation
 
 > Last Updated: 2026-02-24
-> Version: 3.5
+> Version: 4.0
 
 ## Progress Tracker
 
@@ -28,6 +28,16 @@
 - [x] **健康档案 v3.3 — 分组结构存储**：groups_data 字段（key/value/unit/ref/status），OCRScanner 分组表格+内联编辑+异常高亮，records.vue 分组表格展示+右栏异常概览
 - [x] **健康档案 v3.4 — 医生分析 + 列表修复**：列表接口补充 groups 字段；基本信息分组卡片展示（不显示参考范围/状态）；OCRScanner 扫描后可选医生（王主任/李医生/张医生/陈医生）进行流式分析，支持自定义医生名字；新增 `/api/v1/analyze-health` 接口
 - [x] **健康档案 v3.5 — OCRScanner 全面重写**：三阶段流程（upload→result→done），基本信息卡片网格+检测指标表格双模式，医生流式分析（SSE），全字段始终可编辑，拖拽上传，图片缩放，原始文本折叠
+- [x] **角色权限系统 v4.0**：8 种角色（PARENT/STUDENT/SCHOOL_ADMIN/CAFETERIA_MANAGER/CAFETERIA_COOK/DOCTOR/INSTITUTION/ADMIN），JWT 认证，Pinia Auth Store 含 15+ 角色 getter（isAdmin/isSchoolAdmin/canManageCafeteria 等）
+- [x] **useAuthGuard composable**：统一 auth guard，所有受保护页面使用 `useAuthGuard(allowedRoles?)` 替代手动 localStorage 检查，支持角色白名单
+- [x] **NavBar 角色差异化导航**：右侧显示用户名+角色徽章（颜色按角色），adminItems 按角色过滤，知识库子页面始终显示
+- [x] **登录演示模式**：6 个演示账号卡片，后端不可用时自动 mock 用户进入演示模式，支持角色切换体验
+- [x] **多人群餐单 v2**：8 类人群（普通/学生/老年/孕妇/健身/减脂/糖尿病/高血压），周菜单+购物清单 Tab，购物清单按分类+进度条+打印
+- [x] **食堂餐单计划页**（`/menu/cafeteria`）：周菜单管理，发布/草稿，过敏原标注，AI 排菜，CAFETERIA_MANAGER/SCHOOL_ADMIN/ADMIN 权限
+- [x] **学生管理页**（`/admin/students`）：学生健康档案列表，BMI 统计，班级筛选，添加学生，SCHOOL_ADMIN/ADMIN 权限
+- [x] **用户管理页**（`/admin/users`）：全平台用户账号，角色筛选，启用/禁用，ADMIN 专用
+- [x] **健康档案用户隔离**：`personal-health.ts` 加 `optionalAuthMiddleware`，GET 按 user_id 过滤，POST 写入 user_id，PUT/DELETE 校验所有权（403）
+- [x] **知识库管理可视化算法选择**：4 种算法卡片（混合/向量/BM25/重排序），参数滑块，分块策略选择器
 
 ### 🏗️ 健康档案系统架构（v3.3）
 

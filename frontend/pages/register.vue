@@ -1,11 +1,13 @@
 <script setup lang="ts">
+import { useAuthStore } from '~/stores/auth'
+
 useSeoMeta({
   title: '注册 - NutriMind',
   description: '注册 NutriMind 营养健康平台',
 })
 
 const router = useRouter()
-const config = useRuntimeConfig()
+const authStore = useAuthStore()
 
 const name = ref('')
 const phone = ref('')
@@ -18,25 +20,22 @@ const showPassword = ref(false)
 const showConfirmPassword = ref(false)
 
 const roleOptions = [
-  { value: 'PARENT', label: '家长', description: '查看孩子健康数据' },
-  { value: 'STUDENT', label: '学生', description: '管理个人健康档案' },
-  { value: 'SCHOOL_ADMIN', label: '学校管理员', description: '管理学校营养数据' },
-  { value: 'CAFETERIA_MANAGER', label: '食堂管理员', description: '管理食堂餐单' },
-  { value: 'DOCTOR', label: '医生', description: '提供营养建议' },
+  { value: 'PARENT', label: '家长', icon: '👨‍👩‍👧', description: '查看孩子健康数据，关注家庭营养' },
+  { value: 'STUDENT', label: '学生', icon: '👨‍🎓', description: '管理个人健康档案，获取营养建议' },
+  { value: 'SCHOOL_ADMIN', label: '学校管理员', icon: '🏫', description: '管理学校学生健康与营养数据' },
+  { value: 'CAFETERIA_MANAGER', label: '食堂管理员', icon: '🍽️', description: '制定食堂菜单，管理营养配餐' },
+  { value: 'DOCTOR', label: '医生/营养师', icon: '👨‍⚕️', description: '提供专业营养建议与健康指导' },
 ]
 
 const handleRegister = async () => {
-  // Validation
   if (!name.value || !phone.value || !password.value) {
     error.value = '请填写所有必填项'
     return
   }
-
   if (password.value !== confirmPassword.value) {
     error.value = '两次输入的密码不一致'
     return
   }
-
   if (password.value.length < 6) {
     error.value = '密码长度至少为6位'
     return
@@ -46,46 +45,12 @@ const handleRegister = async () => {
   error.value = ''
 
   try {
-    const response = await fetch(`${config.public.apiBase}/auth/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        phone: phone.value,
-        password: password.value,
-        name: name.value,
-        role: role.value,
-      }),
-    })
-
-    const data = await response.json()
-
-    if (!response.ok) {
-      throw new Error(data.message || '注册失败')
+    const result = await authStore.register(phone.value, password.value, name.value, role.value)
+    if (result.success) {
+      router.push('/dashboard')
+    } else {
+      error.value = result.error || '注册失败'
     }
-
-    // Auto login after register
-    const loginResponse = await fetch(`${config.public.apiBase}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        phone: phone.value,
-        password: password.value,
-      }),
-    })
-
-    const loginData = await loginResponse.json()
-
-    if (!loginResponse.ok) {
-      throw new Error(loginData.message || '自动登录失败，请手动登录')
-    }
-
-    // Store token and user info
-    localStorage.setItem('token', loginData.data.token)
-    localStorage.setItem('refreshToken', loginData.data.refreshToken)
-    localStorage.setItem('user', JSON.stringify(loginData.data.user))
-
-    // Navigate to dashboard
-    router.push('/dashboard')
   } catch (err: any) {
     error.value = err.message || '注册失败，请检查网络'
   } finally {
@@ -93,16 +58,9 @@ const handleRegister = async () => {
   }
 }
 
-const goToLogin = () => {
-  router.push('/login')
-}
-
-// Check if already logged in
 onMounted(() => {
-  const token = localStorage.getItem('token')
-  if (token) {
-    router.push('/dashboard')
-  }
+  authStore.init()
+  if (authStore.isAuthenticated) router.push('/dashboard')
 })
 </script>
 
@@ -179,7 +137,10 @@ onMounted(() => {
                   ? 'border-emerald-500 bg-emerald-50'
                   : 'border-gray-200 hover:border-gray-300'"
               >
-                <p class="font-medium text-gray-900">{{ option.label }}</p>
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-xl">{{ option.icon }}</span>
+                  <p class="font-medium text-gray-900 text-sm">{{ option.label }}</p>
+                </div>
                 <p class="text-xs text-gray-500">{{ option.description }}</p>
               </button>
             </div>
@@ -258,9 +219,9 @@ onMounted(() => {
         <div class="mt-6 text-center">
           <p class="text-gray-500">
             已有账号？
-            <button @click="goToLogin" class="text-emerald-600 hover:text-emerald-700 font-medium">
+            <NuxtLink to="/login" class="text-emerald-600 hover:text-emerald-700 font-medium">
               立即登录
-            </button>
+            </NuxtLink>
           </p>
         </div>
 

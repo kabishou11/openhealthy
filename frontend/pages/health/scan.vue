@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useAuthStore } from '~/stores/auth'
+import { useAuthGuard } from '~/composables/useAuthGuard'
 
 useSeoMeta({
   title: '体检扫描 - NutriMind',
@@ -7,15 +7,7 @@ useSeoMeta({
 })
 
 const router = useRouter()
-const authStore = useAuthStore()
-
-// Check auth
-onMounted(() => {
-  const user = localStorage.getItem('user')
-  if (!user) {
-    router.push('/login')
-  }
-})
+useAuthGuard() // require login
 
 const onScanComplete = () => {
   router.push('/health/records')

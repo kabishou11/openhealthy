@@ -1,8 +1,22 @@
 <script setup lang="ts">
+import { useAuthGuard } from '~/composables/useAuthGuard'
+
 useSeoMeta({ title: '健康档案 - NutriMind', description: '查看和管理您的体检健康档案' })
+
+const { authStore } = useAuthGuard() // require login
 
 const API_BASE = ''
 const router = useRouter()
+
+// Auth headers helper
+const authHeaders = () => {
+  const token = import.meta.client ? localStorage.getItem('token') : null
+  return token ? { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` } : { 'Content-Type': 'application/json' }
+}
+const authFetch = (url: string, opts: RequestInit = {}) => fetch(url, {
+  ...opts,
+  headers: { ...authHeaders(), ...(opts.headers as Record<string, string> || {}) },
+})
 
 interface ScanItem { key: string; value: string; unit: string; ref: string; status: string }
 interface ScanGroup { name: string; items: ScanItem[] }
@@ -45,7 +59,7 @@ const chatLoading  = ref<Record<string, boolean>>({})
 const loadRecords = async () => {
   loading.value = true
   try {
-    const res = await fetch(`${API_BASE}/api/v1/personal-health`)
+    const res = await authFetch(`${API_BASE}/api/v1/personal-health`)
     if (res.ok) { const d = await res.json(); records.value = d.data || [] }
     else { console.error('loadRecords failed:', res.status, await res.text()) }
   } catch (e) { console.error('loadRecords error:', e) } finally { loading.value = false }
@@ -58,7 +72,7 @@ const loadDetail = async (id: string) => {
   // 如果已有 image_data 说明已加载过
   if (records.value[idx]._detailLoaded) return
   try {
-    const res = await fetch(`${API_BASE}/api/v1/personal-health/${id}`)
+    const res = await authFetch(`${API_BASE}/api/v1/personal-health/${id}`)
     if (res.ok) {
       const d = await res.json()
       records.value[idx] = { ...records.value[idx], ...d.data, _detailLoaded: true,
@@ -80,7 +94,7 @@ const deleteRecord = async (id: string) => {
   if (!confirm('确认删除该体检记录？')) return
   deleting.value = id
   try {
-    await fetch(`${API_BASE}/api/v1/personal-health/${id}`, { method: 'DELETE' })
+    await authFetch(`${API_BASE}/api/v1/personal-health/${id}`, { method: 'DELETE' })
     records.value = records.value.filter(r => r.id !== id)
     if (expandedId.value === id) expandedId.value = null
   } finally { deleting.value = null }
@@ -143,7 +157,7 @@ const saveEdit = async () => {
   try {
     const sd: Record<string, string> = {}
     for (const g of editGroups.value) for (const item of g.items) if (item.key) sd[item.key] = item.value + (item.unit ? ` ${item.unit}` : '')
-    const res = await fetch(`${API_BASE}/api/v1/personal-health/${editingId.value}`, {
+    const res = await authFetch(`${API_BASE}/api/v1/personal-health/${editingId.value}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: editTitle.value, scanDate: editDate.value, notes: editNotes.value, summary: editSummary.value, structuredData: sd, groups: editGroups.value }),
     })
@@ -169,7 +183,7 @@ const saveManual = async () => {
   try {
     const sd: Record<string, string> = {}
     for (const g of manualGroups.value) for (const item of g.items) if (item.key) sd[item.key] = item.value + (item.unit ? ` ${item.unit}` : '')
-    const res = await fetch(`${API_BASE}/api/v1/personal-health`, {
+    const res = await authFetch(`${API_BASE}/api/v1/personal-health`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ structuredData: sd, groups: manualGroups.value, scanDate: manualDate.value, title: manualTitle.value || `手动记录 ${manualDate.value}`, notes: manualNotes.value, sourceType: 'manual' }),
     })
@@ -191,7 +205,7 @@ const sendChat = async (recordId: string) => {
   chatLoading.value[recordId] = true
 
   try {
-    const res = await fetch(`${API_BASE}/api/v1/analyze-health/chat`, {
+    const res = await authFetch(`${API_BASE}/api/v1/analyze-health/chat`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ recordId, message: msg, history: chatHistory.value[recordId].slice(0, -1) }),
     })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useAuthStore } from '~/stores/auth'
+import { useAuthGuard } from '~/composables/useAuthGuard'
 import { useMenusAPI } from '~/composables/useMenus'
 
 useSeoMeta({
@@ -8,25 +8,12 @@ useSeoMeta({
 })
 
 const router = useRouter()
-const authStore = useAuthStore()
+const { authStore } = useAuthGuard(['CAFETERIA_MANAGER', 'CAFETERIA_COOK', 'ADMIN'])
 const { getDishes, getTodayMenu, getWeekMenu } = useMenusAPI()
 
 const activeTab = ref('dishes')
 const loading = ref(false)
 const selectedDate = ref(new Date().toISOString().split('T')[0])
-
-// Check admin access
-onMounted(() => {
-  const user = localStorage.getItem('user')
-  if (user) {
-    const userData = JSON.parse(user)
-    if (!['CAFETERIA_MANAGER', 'ADMIN'].includes(userData.role)) {
-      router.push('/dashboard')
-    }
-  } else {
-    router.push('/login')
-  }
-})
 
 // Data
 const dishes = ref<any[]>([])
