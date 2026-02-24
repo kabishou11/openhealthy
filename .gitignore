@@ -61,3 +61,8 @@ models/
 venv/
 env/
 .venv/
+
+# Claude Code internal docs (not for public repo)
+CLAUDE.md
+**/CLAUDE.md
+.claude/settings.local.json
