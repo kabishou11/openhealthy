@@ -156,7 +156,7 @@ function getDefaultConfig(): LangGraphConfig {
   return {
     modelScopeApiKey: process.env.MODELSCOPE_TOKEN || process.env.OPENAI_API_KEY || '',
     modelScopeApiBase: process.env.MODELSCOPE_API_URL || 'https://api-inference.modelscope.cn/v1',
-    model: process.env.OPENAI_MODEL || 'Qwen/Qwen3-8B',  // Default to Qwen3-8B
+    model: process.env.OPENAI_MODEL || 'Qwen/Qwen3-235B-A22B',  // Default to Qwen3-235B-A22B
     temperature: 0.1,
     maxTokens: 2000,
     sessionTtl: 86400,
@@ -168,7 +168,7 @@ function getDefaultConfig(): LangGraphConfig {
 let llmInstance: ChatOpenAI | null = null;
 
 // Currently selected model (set per request from frontend)
-let selectedModel = process.env.OPENAI_MODEL || 'Qwen/Qwen3-8B';
+let selectedModel = process.env.OPENAI_MODEL || 'Qwen/Qwen3-235B-A22B';
 
 export function setSelectedModel(model: string) {
   selectedModel = model;

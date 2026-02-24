@@ -1,904 +1,310 @@
 <script setup lang="ts">
-interface Emits {
-  (e: 'scan-complete', data: any): void
+// ═══════════════════════════════════════════════════════════
+// OCRScanner — 体检报告智能识别 · AI 总结 · 档案存储
+// ═══════════════════════════════════════════════════════════
+interface ScanItem { key: string; value: string; unit: string; ref: string; status: string }
+interface ScanGroup { name: string; items: ScanItem[] }
+
+const emit = defineEmits<{
+  (e: 'scan-complete', data: { id: string }): void
   (e: 'cancel'): void
-}
+}>()
 
-const emit = defineEmits<Emits>()
+const API = 'http://127.0.0.1:3001'
 
-interface ExtractedData {
-  name: string
-  studentId: string
-  school: string
-  grade: string
-  class: string
-  checkDate: string
-  birthDate: string
-  gender: '男' | '女'
-  metrics: {
-    height: number
-    weight: number
-    bmi: number
-    visionLeft: number
-    visionRight: number
-    bloodPressureSystolic: number
-    bloodPressureDiastolic: number
-    heartRate: number
-    lungCapacity: number
-    hemoglobin: number
-  }
-  allergies: string[]
-  conditions: string[]
-}
+// ── Core state ──
+const image       = ref<string | null>(null)
+const scanning    = ref(false)
+const error       = ref<string | null>(null)
+const rawText     = ref<string | null>(null)
+const title       = ref('')
+const groups      = ref<ScanGroup[]>([])
+const summary     = ref('')
+const saving      = ref(false)
+const saved       = ref(false)
+const showRaw     = ref(false)
+const zoomed      = ref(false)
+const isDragging  = ref(false)
 
-const API_BASE = 'http://127.0.0.1:3001'
+// ── Info group detection ──
+const INFO_KEYS = ['基本信息', '个人信息', '患者信息', '受检者', '一般信息']
+const isInfo = (n: string) => INFO_KEYS.some(k => n.includes(k))
 
-// State
-const isUploading = ref(false)
-const isProcessing = ref(false)
-const uploadedImage = ref<string | null>(null)
-const extractedData = ref<ExtractedData | null>(null)
-const ocrRawText = ref<string | null>(null)
-const error = ref<string | null>(null)
-const ocrMode = ref<'health-checkup' | 'handwriting' | 'table' | 'general'>('health-checkup')
+// ── Computed ──
+const total    = computed(() => groups.value.reduce((s, g) => s + g.items.length, 0))
+const abnormal = computed(() => groups.value.reduce((s, g) => s + g.items.filter(i => i.status === 'high' || i.status === 'low').length, 0))
+const phase    = computed(() => saved.value ? 'done' : groups.value.length ? 'result' : 'upload')
 
-// GLM-OCR Model state - pipeline mode
-const modelLoaded = ref(false)
-const modelLoading = ref(false)
-const modelUrl = ref<string | null>(null)
-const modelLoadProgress = ref<{ stage: string; percent: number; message: string } | null>(null)
-const modelError = ref<string | null>(null)
-const currentBackend = ref<string | null>(null)   // currently loaded backend
-const selectedBackend = ref<'glm-ocr' | 'got-ocr'>('got-ocr')  // user selection
-const backendsInfo = ref<Record<string, { path: string; available: boolean }> | null>(null)
-
-// Poll status
-let statusPollTimer: ReturnType<typeof setInterval> | null = null
-
-// Refresh GLM-OCR model status from server
-const refreshStatus = async () => {
-  try {
-    const response = await fetch(`${API_BASE}/api/v1/ocr/status`)
-    if (response.ok) {
-      const data = await response.json()
-      console.log('OCR Status update:', data)
-      modelLoaded.value = data.modelLoaded === true
-      modelLoading.value = data.loading === true
-      modelUrl.value = data.url || null
-      currentBackend.value = data.backend || null
-      if (data.backends) backendsInfo.value = data.backends
-      if (data.progress) {
-        modelLoadProgress.value = data.progress
-      }
-      console.log('modelLoaded:', modelLoaded.value, 'modelLoading:', modelLoading.value, 'backend:', currentBackend.value)
-    } else {
-      console.log('Status check failed, resetting to unloaded')
-      modelLoaded.value = false
-      modelLoading.value = false
-      currentBackend.value = null
+// ── Image compress ──
+const compress = (file: File): Promise<string> => new Promise((ok, fail) => {
+  const r = new FileReader()
+  r.onload = e => {
+    const img = new Image()
+    img.onload = () => {
+      const M = 2048; let w = img.width, h = img.height
+      if (w > M || h > M) { const s = Math.min(M / w, M / h); w = Math.round(w * s); h = Math.round(h * s) }
+      const c = document.createElement('canvas'); c.width = w; c.height = h
+      const ctx = c.getContext('2d')
+      if (!ctx) { fail(new Error('canvas')); return }
+      ctx.drawImage(img, 0, 0, w, h)
+      ok(c.toDataURL('image/jpeg', 0.9))
     }
-  } catch (e) {
-    console.error('Failed to refresh OCR status:', e)
-    modelLoaded.value = false
-    modelLoading.value = false
-    currentBackend.value = null
+    img.onerror = () => fail(new Error('图片加载失败'))
+    img.src = e.target?.result as string
   }
-}
-
-const pollStatus = async () => {
-  await refreshStatus()
-
-  // Stop polling if not loading
-  if (!modelLoading.value && statusPollTimer) {
-    clearInterval(statusPollTimer)
-    statusPollTimer = null
-  }
-}
-
-// Load GLM-OCR model
-const loadModel = async () => {
-  console.log('Loading OCR model, backend:', selectedBackend.value)
-  modelError.value = null
-  modelLoading.value = true
-  modelLoadProgress.value = { stage: '准备中', percent: 0, message: '开始加载模型...' }
-
-  // Start polling
-  if (statusPollTimer) clearInterval(statusPollTimer)
-  statusPollTimer = setInterval(pollStatus, 500)
-
-  try {
-    console.log('Sending load request to backend...')
-    const response = await fetch(`${API_BASE}/api/v1/ocr/load`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ backend: selectedBackend.value }),
-    })
-
-    console.log('Load response status:', response.status)
-    const data = await response.json()
-    console.log('Load response:', data)
-
-    if (!response.ok) {
-      modelError.value = data.error || '加载模型失败'
-      modelLoading.value = false
-      if (statusPollTimer) {
-        clearInterval(statusPollTimer)
-        statusPollTimer = null
-      }
-      return
-    }
-
-    // Immediate refresh after load request
-    await refreshStatus()
-  } catch (e) {
-    console.error('Load error:', e)
-    modelError.value = e instanceof Error ? e.message : '加载模型失败'
-    modelLoading.value = false
-    if (statusPollTimer) {
-      clearInterval(statusPollTimer)
-      statusPollTimer = null
-    }
-  }
-}
-
-// Unload GLM-OCR model
-const unloadModel = async () => {
-  console.log('Unloading model...')
-  try {
-    const response = await fetch(`${API_BASE}/api/v1/ocr/unload`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    })
-    console.log('Unload response:', response.status, response.ok)
-
-    // Force local state update immediately
-    modelLoaded.value = false
-    modelLoading.value = false
-    modelUrl.value = null
-    modelLoadProgress.value = { stage: '已卸载', percent: 0, message: '模型已卸载' }
-
-    // Also fetch from server to verify
-    await refreshStatus()
-  } catch (e) {
-    console.error('Failed to unload model:', e)
-    // Still update local state
-    modelLoaded.value = false
-    modelUrl.value = null
-  }
-}
-
-// Initialize - fetch initial status but don't load model automatically
-onMounted(async () => {
-  console.log('OCRScanner mounted, fetching initial status...')
-  await refreshStatus()
+  r.onerror = () => fail(new Error('读取失败'))
+  r.readAsDataURL(file)
 })
 
-onUnmounted(() => {
-  if (statusPollTimer) {
-    clearInterval(statusPollTimer)
-    statusPollTimer = null
-  }
-})
-
-// Mock OCR result
-const mockOCRResult: ExtractedData = {
-  name: '张三',
-  studentId: '2024001',
-  school: '阳光小学',
-  grade: '三年级',
-  class: '二班',
-  checkDate: '2024-03-15',
-  birthDate: '2012-06-15',
-  gender: '男',
-  metrics: {
-    height: 145,
-    weight: 38,
-    bmi: 18.1,
-    visionLeft: 1.0,
-    visionRight: 0.8,
-    bloodPressureSystolic: 105,
-    bloodPressureDiastolic: 68,
-    heartRate: 82,
-    lungCapacity: 2200,
-    hemoglobin: 128,
-  },
-  allergies: [],
-  conditions: [],
+// ── File handling ──
+const pickFile = async (evt: Event) => {
+  const f = (evt.target as HTMLInputElement).files?.[0]
+  if (!f) return
+  if (!/^image\/(jpeg|jpg|png|webp|gif)$/.test(f.type)) { error.value = '仅支持 JPG / PNG / WebP 格式'; return }
+  if (f.size > 20 * 1024 * 1024) { error.value = '图片不能超过 20MB'; return }
+  error.value = null; rawText.value = null; groups.value = []; title.value = ''; summary.value = ''
+  try { image.value = await compress(f) } catch { const r = new FileReader(); r.onload = e => { image.value = e.target?.result as string }; r.readAsDataURL(f) }
 }
-
-const handleFileSelect = (event: Event) => {
-  const input = event.target as HTMLInputElement
-  if (input.files && input.files[0]) {
-    const file = input.files[0]
-
-    // 支持图片和 PDF 格式
-    const supportedImageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp']
-    const supportedPdfType = 'application/pdf'
-
-    if (!supportedImageTypes.includes(file.type) && file.type !== supportedPdfType) {
-      error.value = '请上传图片文件或PDF文件'
-      return
-    }
-
-    if (file.type === supportedPdfType) {
-      // 处理 PDF 文件
-      if (file.size > 20 * 1024 * 1024) {
-        error.value = 'PDF文件大小不能超过20MB'
-        return
-      }
-      processPdfFile(file)
-    } else {
-      // 处理图片文件
-      if (file.size > 10 * 1024 * 1024) {
-        error.value = '图片大小不能超过10MB'
-        return
-      }
-
-      // 压缩图片
-      compressImage(file).then((compressedBase64) => {
-        uploadedImage.value = compressedBase64
-        error.value = null
-        extractedData.value = null
-      }).catch((err) => {
-        console.error('Image compression error:', err)
-        // 如果压缩失败，使用原始图片
-        const reader = new FileReader()
-        reader.onload = (e) => {
-          uploadedImage.value = e.target?.result as string
-          error.value = null
-          extractedData.value = null
-        }
-        reader.readAsDataURL(file)
-      })
-    }
-  }
-}
-
-// 压缩图片为 base64
-const compressImage = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      const img = new Image()
-      img.onload = () => {
-        // 计算最大尺寸 (GLM-OCR 最佳输入尺寸)
-        const MAX_WIDTH = 1024
-        const MAX_HEIGHT = 1024
-        let width = img.width
-        let height = img.height
-
-        // 缩放图片
-        if (width > MAX_WIDTH || height > MAX_HEIGHT) {
-          const ratio = Math.min(MAX_WIDTH / width, MAX_HEIGHT / height)
-          width = Math.round(width * ratio)
-          height = Math.round(height * ratio)
-        }
-
-        // 创建 canvas 进行压缩
-        const canvas = document.createElement('canvas')
-        canvas.width = width
-        canvas.height = height
-        const ctx = canvas.getContext('2d')
-        if (!ctx) {
-          reject(new Error('Cannot get canvas context'))
-          return
-        }
-
-        // 绘制压缩后的图片
-        ctx.drawImage(img, 0, 0, width, height)
-
-        // 导出为 JPEG，质量 0.8
-        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.8)
-
-        // 检查压缩后的大小
-        const base64Length = compressedBase64.split(',')[1].length
-        const fileSizeInMB = (base64Length * 3) / 4 / 1024 / 1024
-        console.log(`Compressed image size: ${fileSizeInMB.toFixed(2)} MB`)
-
-        resolve(compressedBase64)
-      }
-      img.onerror = () => reject(new Error('Failed to load image'))
-      img.src = e.target?.result as string
-    }
-    reader.onerror = () => reject(new Error('Failed to read file'))
-    reader.readAsDataURL(file)
-  })
-}
-
-// 处理 PDF 文件 - 发送到后端解析
-const processPdfFile = async (file: File) => {
-  isProcessing.value = true
-  error.value = null
-  extractedData.value = null
-  uploadedImage.value = null
-
-  try {
-    // Read file as base64
-    const reader = new FileReader()
-    reader.onload = async () => {
-      const base64Data = reader.result as string
-
-      try {
-        const response = await fetch('http://127.0.0.1:3001/api/v1/ocr/pdf', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            file: base64Data,
-            filename: file.name,
-          }),
-        })
-
-        if (!response.ok) {
-          throw new Error('PDF解析失败')
-        }
-
-        const data = await response.json()
-
-        if (data.success && data.extractedData) {
-          extractedData.value = data.extractedData
-          uploadedImage.value = 'PDF已解析'
-        } else {
-          throw new Error(data.error || 'PDF解析失败')
-        }
-      } catch (err) {
-        error.value = err instanceof Error ? err.message : 'PDF处理失败，请重试或尝试上传图片'
-      } finally {
-        isProcessing.value = false
-      }
-    }
-    reader.readAsDataURL(file)
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : 'PDF处理失败，请重试或尝试上传图片'
-    isProcessing.value = false
-  }
-}
-
-const processImage = async () => {
-  if (!uploadedImage.value) return
-
-  // Double check model is loaded
-  if (!modelLoaded.value) {
-    error.value = '模型未加载，请先点击"加载模型"按钮'
-    return
-  }
-
-  isProcessing.value = true
-  error.value = null
-  ocrRawText.value = null
-
-  console.log('Starting OCR process, mode:', ocrMode.value)
-
-  try {
-    if (ocrMode.value === 'health-checkup') {
-      // Structured health data extraction
-      const response = await fetch('http://127.0.0.1:3001/api/v1/ocr/health-checkup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: uploadedImage.value }),
-      })
-
-      if (!response.ok) {
-        const errData = await response.json()
-        throw new Error(errData.error || 'OCR处理失败')
-      }
-
-      const data = await response.json()
-      if (data.success && data.extractedData) {
-        extractedData.value = data.extractedData
-      } else {
-        throw new Error(data.error || 'OCR识别失败')
-      }
-    } else {
-      // General / handwriting / table OCR - returns raw text
-      const response = await fetch('http://127.0.0.1:3001/api/v1/ocr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: uploadedImage.value, mode: ocrMode.value }),
-      })
-
-      if (!response.ok) {
-        const errData = await response.json()
-        throw new Error(errData.error || 'OCR处理失败')
-      }
-
-      const data = await response.json()
-      if (data.success) {
-        ocrRawText.value = data.text || ''
-      } else {
-        throw new Error(data.error || 'OCR识别失败')
-      }
-    }
-  }
-  catch (err) {
-    console.error('OCR error:', err)
-    error.value = err instanceof Error ? err.message : 'OCR处理失败，请重试'
-    if (ocrMode.value === 'health-checkup') {
-      extractedData.value = mockOCRResult
-    }
-  }
-  finally {
-    isProcessing.value = false
-  }
-}
-
+const onDrop = (e: DragEvent) => { e.preventDefault(); isDragging.value = false; const f = e.dataTransfer?.files[0]; if (f) pickFile({ target: { files: [f] } } as any) }
 const reset = () => {
-  uploadedImage.value = null
-  extractedData.value = null
-  ocrRawText.value = null
-  error.value = null
-  const input = document.getElementById('ocr-file-input') as HTMLInputElement
-  if (input) input.value = ''
+  image.value = null; rawText.value = null; groups.value = []; error.value = null
+  saved.value = false; title.value = ''; zoomed.value = false; summary.value = ''
+  const el = document.getElementById('scan-input') as HTMLInputElement; if (el) el.value = ''
 }
 
-const handleSave = () => {
-  if (extractedData.value) {
-    emit('scan-complete', extractedData.value)
-  }
+// ── Scan ──
+const scan = async () => {
+  if (!image.value) return
+  scanning.value = true; error.value = null
+  try {
+    const res = await fetch(`${API}/api/v1/scan-health`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: image.value }) })
+    const d = await res.json()
+    if (!res.ok) throw new Error(d.error || '识别失败')
+    rawText.value = d.rawText || ''; title.value = d.title || ''; summary.value = d.summary || ''
+    groups.value = (d.groups || []).map((g: ScanGroup) => ({ name: g.name, items: g.items.map((i: ScanItem) => ({ ...i })) }))
+  } catch (e: any) { error.value = e.message } finally { scanning.value = false }
 }
 
-const getBMIStatus = (bmi: number) => {
-  if (bmi < 18.5) return { label: '偏瘦', color: 'text-blue-600', bg: 'bg-blue-100', gradient: 'from-blue-400 to-blue-600' }
-  if (bmi < 24) return { label: '正常', color: 'text-green-600', bg: 'bg-green-100', gradient: 'from-green-400 to-green-600' }
-  if (bmi < 28) return { label: '偏胖', color: 'text-amber-600', bg: 'bg-amber-100', gradient: 'from-amber-400 to-amber-600' }
-  return { label: '肥胖', color: 'text-red-600', bg: 'bg-red-100', gradient: 'from-red-400 to-red-600' }
+// ── Edit helpers ──
+const upd = (gi: number, ii: number, f: keyof ScanItem, v: string) => { groups.value[gi].items[ii][f] = v }
+const rmItem = (gi: number, ii: number) => { groups.value[gi].items.splice(ii, 1); if (!groups.value[gi].items.length) groups.value.splice(gi, 1) }
+const addItem = (gi: number) => { groups.value[gi].items.push({ key: '', value: '', unit: '', ref: '', status: 'unknown' }) }
+const addGroup = () => { groups.value.push({ name: '新分组', items: [{ key: '', value: '', unit: '', ref: '', status: 'unknown' }] }) }
+
+// ── Save ──
+const save = async () => {
+  if (!groups.value.length && !rawText.value) return
+  saving.value = true
+  try {
+    const sd: Record<string, string> = {}
+    for (const g of groups.value) for (const i of g.items) if (i.key) sd[i.key] = i.value + (i.unit ? ` ${i.unit}` : '')
+    const res = await fetch(`${API}/api/v1/personal-health`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rawText: rawText.value || '', structuredData: sd, groups: groups.value, scanDate: new Date().toISOString().split('T')[0], title: title.value || undefined, summary: summary.value || undefined, imageData: image.value || undefined }),
+    })
+    const d = await res.json()
+    if (!res.ok) throw new Error(d.error || '保存失败')
+    saved.value = true; emit('scan-complete', { id: d.id })
+  } catch (e: any) { error.value = e.message } finally { saving.value = false }
 }
 
-const getVisionStatus = (vision: number) => {
-  if (vision >= 1.0) return { label: '正常', color: 'text-green-600' }
-  if (vision >= 0.8) return { label: '轻度近视', color: 'text-amber-600' }
-  return { label: '近视', color: 'text-red-600' }
-}
+// ── Status helpers ──
+const stColor = (s: string) => ({ high: 'text-rose-600 bg-rose-50 border-rose-200', low: 'text-amber-600 bg-amber-50 border-amber-200', normal: 'text-emerald-600 bg-emerald-50 border-emerald-200', unknown: 'text-slate-400 bg-slate-50 border-slate-200' }[s] || 'text-slate-400 bg-slate-50 border-slate-200')
+const stLabel = (s: string) => ({ high: '偏高', low: '偏低', normal: '正常', unknown: '—' }[s] || '—')
 </script>
 
 <template>
-  <div class="max-w-5xl mx-auto">
-    <div class="flex items-center gap-4 mb-6">
-      <button @click="emit('cancel')" class="p-2 hover:bg-gray-100 rounded-xl transition-colors">
-        <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-        </svg>
+  <div class="max-w-4xl mx-auto font-sans">
+
+    <!-- ═══ HEADER BAR ═══ -->
+    <div class="flex items-center gap-3 mb-5">
+      <button @click="emit('cancel')" class="w-9 h-9 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
       </button>
-      <h2 class="text-2xl font-bold text-gray-900">体检表OCR扫描</h2>
-    </div>
-
-    <!-- OCR Model Section -->
-    <div class="card mb-6 bg-gradient-to-r from-violet-50 to-indigo-50 border-violet-200">
-      <h3 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-        <svg class="w-5 h-5 text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-        </svg>
-        OCR 模型
-      </h3>
-
-      <!-- Backend Selector (only when not loaded) -->
-      <div v-if="!modelLoaded && !modelLoading" class="mb-4">
-        <label class="block text-sm font-medium text-gray-700 mb-2">选择 OCR 引擎</label>
-        <div class="grid grid-cols-2 gap-3">
-          <button
-            @click="selectedBackend = 'got-ocr'"
-            :class="[
-              'p-3 rounded-xl border-2 text-left transition-all',
-              selectedBackend === 'got-ocr'
-                ? 'border-violet-500 bg-violet-50'
-                : 'border-gray-200 bg-white hover:border-violet-300'
-            ]"
-          >
-            <div class="flex items-center gap-2 mb-1">
-              <span class="text-base">🔬</span>
-              <span class="font-semibold text-sm text-gray-900">GOT-OCR2.0</span>
-              <span v-if="backendsInfo?.['got-ocr']?.available" class="text-xs text-green-600 bg-green-100 px-1.5 py-0.5 rounded-full">已下载</span>
-              <span v-else class="text-xs text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded-full">未下载</span>
-            </div>
-            <p class="text-xs text-gray-500">transformers 直接推理，无需 vLLM，CPU/GPU 均可</p>
-          </button>
-          <button
-            @click="selectedBackend = 'glm-ocr'"
-            :class="[
-              'p-3 rounded-xl border-2 text-left transition-all',
-              selectedBackend === 'glm-ocr'
-                ? 'border-violet-500 bg-violet-50'
-                : 'border-gray-200 bg-white hover:border-violet-300'
-            ]"
-          >
-            <div class="flex items-center gap-2 mb-1">
-              <span class="text-base">🧠</span>
-              <span class="font-semibold text-sm text-gray-900">GLM-OCR</span>
-              <span v-if="backendsInfo?.['glm-ocr']?.available" class="text-xs text-green-600 bg-green-100 px-1.5 py-0.5 rounded-full">已下载</span>
-              <span v-else class="text-xs text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded-full">未下载</span>
-            </div>
-            <p class="text-xs text-gray-500">智谱 AI，需要 vLLM + CUDA GPU，精度更高</p>
-          </button>
-        </div>
-      </div>
-
-      <div class="flex items-center justify-between mb-4">
-        <div>
-          <p v-if="!modelLoaded && !modelLoading" class="text-sm text-gray-500">
-            {{ selectedBackend === 'glm-ocr' ? '智谱 AI GLM-OCR，需要 vLLM 和 CUDA GPU' : 'GOT-OCR2.0，支持 CPU/GPU，无需 vLLM' }}
-          </p>
-          <p v-if="modelLoaded" class="text-sm text-gray-600">
-            当前引擎：<span class="font-semibold text-violet-700">{{ currentBackend === 'glm-ocr' ? 'GLM-OCR (vLLM)' : 'GOT-OCR2.0' }}</span>
-          </p>
-          <p v-if="modelUrl" class="text-xs text-green-600 mt-1">服务: {{ modelUrl }}</p>
-        </div>
-        <div class="flex gap-2">
-          <button
-            v-if="!modelLoaded && !modelLoading"
-            @click="loadModel"
-            class="px-6 py-2 bg-violet-500 hover:bg-violet-600 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
-          >
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            加载模型
-          </button>
-          <button
-            v-if="modelLoaded && !modelLoading"
-            @click="unloadModel"
-            class="px-6 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl font-medium transition-colors flex items-center gap-2"
-          >
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-            卸载模型
-          </button>
-        </div>
-      </div>
-
-      <!-- Loading Progress -->
-      <div v-if="modelLoading && modelLoadProgress" class="mb-4">
-        <div class="flex items-center justify-between text-sm mb-2">
-          <span class="text-gray-600">正在加载: {{ modelLoadProgress.stage }}</span>
-          <span class="font-semibold text-violet-600">{{ modelLoadProgress.percent }}%</span>
-        </div>
-        <div class="h-3 bg-gray-200 rounded-full overflow-hidden">
-          <div
-            class="h-full bg-gradient-to-r from-violet-500 to-indigo-500 transition-all duration-300"
-            :style="{ width: `${modelLoadProgress.percent}%` }"
-          ></div>
-        </div>
-        <p class="text-xs text-gray-500 mt-1">{{ modelLoadProgress.message }}</p>
-      </div>
-
-      <!-- Model Status - LOADED -->
-      <div v-if="modelLoaded && !modelLoading" class="flex items-center gap-2 text-sm text-green-600">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <span class="font-medium">{{ currentBackend === 'glm-ocr' ? 'GLM-OCR' : 'GOT-OCR2.0' }} 已就绪</span>
-      </div>
-
-      <!-- Model Status - NOT LOADED -->
-      <div v-if="!modelLoaded && !modelLoading" class="flex items-center gap-2 text-sm text-gray-500">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <span>请点击"加载模型"按钮开始使用 OCR</span>
-      </div>
-
-      <!-- Error Message -->
-      <div v-if="modelError" class="mt-4 p-3 bg-red-50 border border-red-200 rounded-xl">
-        <p class="text-sm text-red-600">{{ modelError }}</p>
-      </div>
-    </div>
-
-    <div class="grid md:grid-cols-2 gap-8">
-      <!-- Upload Section -->
-      <div class="card">
-        <h3 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-          <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>
-          上传文件
-        </h3>
-
-        <!-- OCR Mode Selector -->
-        <div class="mb-4">
-          <label class="block text-sm font-medium text-gray-700 mb-2">识别模式</label>
-          <div class="grid grid-cols-2 gap-2">
-            <button
-              v-for="m in [
-                { value: 'health-checkup', label: '体检表', icon: '🏥' },
-                { value: 'handwriting', label: '手写识别', icon: '✍️' },
-                { value: 'table', label: '表格识别', icon: '📊' },
-                { value: 'general', label: '通用识别', icon: '📄' },
-              ]"
-              :key="m.value"
-              @click="ocrMode = m.value as any"
-              :class="[
-                'px-3 py-2 rounded-xl text-sm font-medium transition-colors border',
-                ocrMode === m.value
-                  ? 'bg-violet-500 text-white border-violet-500'
-                  : 'bg-white text-gray-600 border-gray-200 hover:border-violet-300'
-              ]"
-            >
-              {{ m.icon }} {{ m.label }}
-            </button>
+      <div class="flex-1 min-w-0">
+        <template v-if="phase === 'result'">
+          <input v-model="title" class="w-full text-lg font-bold text-slate-800 bg-transparent border-b-2 border-transparent hover:border-indigo-300 focus:border-indigo-500 focus:outline-none transition-colors pb-0.5 tracking-tight" placeholder="报告标题"/>
+          <div class="flex items-center gap-2 mt-0.5">
+            <span class="text-xs text-slate-400">{{ total }} 项指标</span>
+            <span v-if="abnormal > 0" class="text-xs text-rose-500 font-semibold">{{ abnormal }} 项异常</span>
           </div>
-        </div>
+        </template>
+        <template v-else-if="phase === 'upload'">
+          <h2 class="text-lg font-bold text-slate-800 tracking-tight">体检报告识别</h2>
+          <p class="text-xs text-slate-400 mt-0.5">AI 视觉模型 · 自动提取 · 智能分组 · AI 总结</p>
+        </template>
+      </div>
+      <!-- Save button -->
+      <button v-if="phase === 'result'" @click="save" :disabled="saving"
+        class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all flex-shrink-0"
+        :class="saving ? 'bg-slate-100 text-slate-400' : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-lg shadow-emerald-500/25 active:scale-[0.97]'">
+        <svg v-if="saving" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+        <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+        {{ saving ? '保存中' : '存入档案' }}
+      </button>
+    </div>
 
-        <div
-          class="relative border-2 border-dashed rounded-2xl p-8 text-center transition-all duration-300"
-          :class="uploadedImage ? 'border-emerald-500 bg-emerald-50/50' : 'border-gray-300 hover:border-emerald-400 bg-gray-50/50'"
-        >
-          <input
-            id="ocr-file-input"
-            type="file"
-            accept="image/*,.pdf"
-            class="hidden"
-            @change="handleFileSelect"
-          >
+    <!-- ═══ PHASE: DONE ═══ -->
+    <div v-if="phase === 'done'" class="flex flex-col items-center justify-center py-20 text-center">
+      <div class="w-16 h-16 rounded-2xl bg-emerald-500 flex items-center justify-center mb-4 shadow-xl shadow-emerald-500/30 rotate-3">
+        <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+      </div>
+      <h3 class="text-lg font-bold text-slate-800 mb-1">已存入健康档案</h3>
+      <p class="text-sm text-slate-400 mb-6">{{ title || '体检记录' }} · {{ total }} 项指标</p>
+      <button @click="reset" class="px-5 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl text-sm font-semibold transition-all shadow-lg shadow-indigo-500/25">继续扫描</button>
+    </div>
 
-          <template v-if="uploadedImage">
-            <div class="relative">
-              <div v-if="uploadedImage === 'PDF已解析'" class="py-12">
-                <svg class="w-16 h-16 mx-auto text-emerald-500 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <p class="text-emerald-600 font-medium">PDF 文件已解析</p>
-              </div>
-              <img
-                v-else
-                :src="uploadedImage"
-                alt="上传的体检表"
-                class="max-h-80 mx-auto rounded-xl shadow-lg"
-              >
-              <button
-                @click="reset"
-                class="absolute -top-3 -right-3 w-8 h-8 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-lg flex items-center justify-center transition-colors"
-              >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
+    <!-- ═══ PHASE: UPLOAD ═══ -->
+    <template v-if="phase === 'upload'">
+      <div class="space-y-4">
+        <div @dragover.prevent="isDragging = true" @dragleave="isDragging = false" @drop="onDrop"
+          class="relative rounded-2xl border-2 border-dashed transition-all duration-300 overflow-hidden"
+          :class="isDragging ? 'border-indigo-400 bg-indigo-50/50 scale-[1.01]' : image ? 'border-indigo-300 bg-white' : 'border-slate-200 hover:border-indigo-300 bg-slate-50/50'">
+          <label for="scan-input" class="block cursor-pointer">
+            <input id="scan-input" type="file" accept="image/*" class="hidden" @change="pickFile">
+            <template v-if="image">
+              <img :src="image" alt="体检表" class="w-full max-h-80 object-contain p-4">
+              <button @click.prevent="reset" class="absolute top-3 right-3 w-8 h-8 bg-white/90 backdrop-blur border border-slate-200 hover:border-rose-300 text-slate-400 hover:text-rose-500 rounded-xl flex items-center justify-center shadow-sm transition-all">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
               </button>
-            </div>
-          </template>
-
-          <template v-else>
-            <div class="w-20 h-20 bg-gradient-to-br from-emerald-100 to-teal-100 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
-              <svg class="w-12 h-12 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" />
-              </svg>
-            </div>
-            <p class="text-gray-600 mb-2 font-medium">点击或拖拽上传体检表</p>
-            <p class="text-sm text-gray-400 mb-4">支持 JPG、PNG、PDF 格式，最大10MB（PDF最大20MB）</p>
-
-            <label
-              for="ocr-file-input"
-              class="btn btn-primary inline-block cursor-pointer flex items-center gap-2"
-            >
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-              </svg>
-              选择图片
-            </label>
-          </template>
+            </template>
+            <template v-else>
+              <div class="flex flex-col items-center justify-center py-20 px-4 text-center">
+                <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-100 to-violet-100 flex items-center justify-center mb-4">
+                  <svg class="w-7 h-7 text-indigo-500" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                </div>
+                <p class="text-sm font-semibold text-slate-700">点击或拖拽上传体检表</p>
+                <p class="text-xs text-slate-400 mt-1">JPG / PNG / WebP · 最大 20MB</p>
+              </div>
+            </template>
+          </label>
         </div>
 
-        <div v-if="error" class="mt-4 p-4 bg-gradient-to-r from-red-50 to-rose-50 border border-red-200 rounded-xl">
-          <div class="flex items-center gap-2">
-            <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <p class="text-red-600 text-sm">{{ error }}</p>
-          </div>
+        <!-- Error -->
+        <div v-if="error" class="flex items-center gap-2 px-4 py-3 bg-rose-50 border border-rose-100 rounded-xl text-sm text-rose-600">
+          <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          {{ error }}
         </div>
 
-        <button
-          v-if="uploadedImage && !extractedData && !ocrRawText"
-          @click="processImage"
-          class="btn w-full mt-4 flex items-center justify-center gap-2"
-          :class="modelLoaded ? 'btn-primary' : 'bg-gray-300 cursor-not-allowed'"
-          :disabled="isProcessing || !modelLoaded"
-        >
-          <template v-if="isProcessing">
-            <svg class="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-            </svg>
-            AI 识别中...
-          </template>
-          <template v-else-if="!modelLoaded">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-          请先加载 OCR 模型
-          </template>
-          <template v-else>
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-            </svg>
-            开始识别
-          </template>
+        <!-- Scan button -->
+        <button v-if="image" @click="scan" :disabled="scanning"
+          class="w-full py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
+          :class="scanning ? 'bg-slate-100 text-slate-400' : 'bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 text-white shadow-lg shadow-indigo-500/25 active:scale-[0.98]'">
+          <svg v-if="scanning" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+          <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          {{ scanning ? 'AI 识别中...' : '开始智能识别' }}
         </button>
       </div>
+    </template>
 
-      <!-- Results Section -->
-      <div class="card">
-        <h3 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-          <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          识别结果
-        </h3>
+    <!-- ═══ PHASE: RESULT ═══ -->
+    <div v-if="phase === 'result'" class="space-y-4">
 
-        <template v-if="ocrRawText">
-          <!-- Raw OCR text result (for non-health-checkup modes) -->
-          <div class="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-4">
-            <div class="flex items-center justify-between mb-2">
-              <h4 class="font-semibold text-gray-700 text-sm">识别文本</h4>
-              <button
-                @click="() => { navigator.clipboard.writeText(ocrRawText || '') }"
-                class="text-xs text-violet-600 hover:text-violet-800 flex items-center gap-1"
-              >
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-                复制
+      <!-- Source bar -->
+      <div class="flex items-start gap-3 p-3 bg-white rounded-2xl border border-slate-200 shadow-sm">
+        <div class="relative flex-shrink-0 cursor-pointer" @click="zoomed = !zoomed">
+          <img :src="image!" alt="原图" class="rounded-xl object-contain bg-slate-50 transition-all duration-300" :class="zoomed ? 'w-full max-h-96' : 'w-16 h-16'"/>
+          <div v-if="!zoomed" class="absolute inset-0 flex items-center justify-center bg-black/10 rounded-xl opacity-0 hover:opacity-100 transition-opacity">
+            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"/></svg>
+          </div>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-semibold text-slate-700 truncate">{{ title }}</p>
+          <div class="flex items-center gap-2 mt-1">
+            <span class="text-xs text-slate-400">{{ total }} 项</span>
+            <span v-if="abnormal" class="text-xs text-rose-500 font-semibold">{{ abnormal }} 异常</span>
+          </div>
+        </div>
+        <div class="flex gap-1.5 flex-shrink-0">
+          <button @click="addGroup" class="px-2.5 py-1.5 text-xs text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors font-medium">+ 分组</button>
+          <button @click="reset" class="px-2.5 py-1.5 text-xs text-slate-500 border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors">重传</button>
+        </div>
+      </div>
+
+      <!-- Error -->
+      <div v-if="error" class="flex items-center gap-2 px-4 py-3 bg-rose-50 border border-rose-100 rounded-xl text-sm text-rose-600">
+        <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        {{ error }}
+      </div>
+
+      <!-- ── AI Summary ── -->
+      <div v-if="summary || phase === 'result'" class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-4 py-2.5 bg-gradient-to-r from-violet-50 to-indigo-50 border-b border-violet-100 flex items-center gap-2">
+          <div class="w-6 h-6 rounded-full bg-violet-500 flex items-center justify-center">
+            <svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+          </div>
+          <span class="text-sm font-bold text-violet-800">AI 分析总结</span>
+        </div>
+        <div class="p-4">
+          <textarea v-model="summary" rows="5" placeholder="AI 将在识别后自动生成分析总结，你也可以手动编辑..."
+            class="w-full text-sm text-slate-700 leading-relaxed bg-slate-50 border border-slate-200 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent resize-none"/>
+        </div>
+      </div>
+
+      <!-- ── Groups ── -->
+      <div v-for="(g, gi) in groups" :key="gi" class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <!-- Group header -->
+        <div class="flex items-center gap-2 px-4 py-2.5 bg-slate-50/80 border-b border-slate-100">
+          <input :value="g.name" @input="(e: Event) => g.name = (e.target as HTMLInputElement).value"
+            class="flex-1 text-xs font-bold text-slate-600 uppercase tracking-wider bg-transparent focus:outline-none focus:text-indigo-600 min-w-0"/>
+          <span class="text-[10px] text-slate-400 tabular-nums">{{ g.items.length }}</span>
+          <button @click="addItem(gi)" class="w-5 h-5 flex items-center justify-center text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+          </button>
+        </div>
+
+        <!-- Info group: card grid -->
+        <template v-if="isInfo(g.name)">
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 p-3">
+            <div v-for="(item, ii) in g.items" :key="ii" class="group relative px-3 py-2 bg-slate-50 rounded-xl border border-slate-100 hover:border-indigo-200 transition-colors">
+              <p class="text-[10px] text-slate-400 mb-0.5">{{ item.key }}</p>
+              <input :value="item.value" @input="(e: Event) => upd(gi, ii, 'value', (e.target as HTMLInputElement).value)"
+                class="w-full text-sm font-semibold text-slate-800 bg-transparent focus:outline-none focus:text-indigo-700"/>
+              <button @click="rmItem(gi, ii)" class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 w-4 h-4 flex items-center justify-center text-slate-300 hover:text-rose-400 transition-all">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
               </button>
             </div>
-            <pre class="text-sm text-gray-800 whitespace-pre-wrap font-mono leading-relaxed max-h-96 overflow-y-auto">{{ ocrRawText }}</pre>
           </div>
-          <button @click="reset" class="btn btn-secondary w-full">重新识别</button>
         </template>
 
-        <template v-else-if="extractedData">
-          <!-- Basic Info -->
-          <div class="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-100 rounded-xl p-4 mb-4">
-            <h4 class="font-semibold text-emerald-900 mb-3 flex items-center gap-2">
-              <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-              基本信息
-            </h4>
-            <div class="grid grid-cols-2 gap-3 text-sm">
-              <div class="flex items-center gap-2">
-                <span class="text-gray-500">姓名：</span>
-                <span class="font-semibold text-gray-900">{{ extractedData.name }}</span>
-              </div>
-              <div class="flex items-center gap-2">
-                <span class="text-gray-500">学号：</span>
-                <span class="font-semibold text-gray-900">{{ extractedData.studentId }}</span>
-              </div>
-              <div class="flex items-center gap-2 col-span-2">
-                <span class="text-gray-500">学校：</span>
-                <span class="font-semibold text-gray-900">{{ extractedData.school }}</span>
-              </div>
-              <div class="flex items-center gap-2">
-                <span class="text-gray-500">班级：</span>
-                <span class="font-semibold text-gray-900">{{ extractedData.grade }}{{ extractedData.class }}</span>
-              </div>
-              <div class="flex items-center gap-2">
-                <span class="text-gray-500">性别：</span>
-                <span class="font-semibold text-gray-900">{{ extractedData.gender }}</span>
-              </div>
-            </div>
+        <!-- Data group: table -->
+        <template v-else>
+          <div class="grid grid-cols-12 gap-1 px-4 py-1.5 text-[10px] text-slate-400 font-semibold uppercase tracking-wider border-b border-slate-50">
+            <span class="col-span-3">指标</span><span class="col-span-2">检测值</span><span class="col-span-1">单位</span><span class="col-span-3">参考范围</span><span class="col-span-2">状态</span><span class="col-span-1"></span>
           </div>
-
-          <!-- Health Metrics Summary -->
-          <div class="space-y-3 mb-4">
-            <h4 class="font-semibold text-gray-900 flex items-center gap-2">
-              <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-              </svg>
-              健康指标
-            </h4>
-
-            <!-- BMI -->
-            <div class="p-4 bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-100 rounded-xl">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-3">
-                  <div class="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm">
-                    <svg class="w-6 h-6 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <p class="text-sm text-gray-500">BMI指数</p>
-                    <p class="font-bold text-2xl text-gray-900">{{ extractedData.metrics.bmi }}</p>
-                  </div>
-                </div>
-                <span class="px-4 py-2 rounded-full text-sm font-bold text-white shadow-lg" :class="`bg-gradient-to-r ${getBMIStatus(extractedData.metrics.bmi).gradient}`">
-                  {{ getBMIStatus(extractedData.metrics.bmi).label }}
-                </span>
-              </div>
+          <div v-for="(item, ii) in g.items" :key="ii"
+            class="group grid grid-cols-12 gap-1 px-4 py-1.5 items-center border-b border-slate-50 last:border-0 transition-colors"
+            :class="item.status === 'high' ? 'bg-rose-50/50' : item.status === 'low' ? 'bg-amber-50/50' : 'hover:bg-slate-50/60'">
+            <input :value="item.key" @input="(e: Event) => upd(gi, ii, 'key', (e.target as HTMLInputElement).value)"
+              class="col-span-3 text-xs text-slate-700 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-400 focus:outline-none transition-colors truncate"/>
+            <input :value="item.value" @input="(e: Event) => upd(gi, ii, 'value', (e.target as HTMLInputElement).value)"
+              class="col-span-2 text-xs font-bold bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-400 focus:outline-none transition-colors tabular-nums"
+              :class="item.status === 'high' ? 'text-rose-600' : item.status === 'low' ? 'text-amber-600' : 'text-slate-800'"/>
+            <input :value="item.unit" @input="(e: Event) => upd(gi, ii, 'unit', (e.target as HTMLInputElement).value)"
+              class="col-span-1 text-[10px] text-slate-400 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-400 focus:outline-none transition-colors"/>
+            <input :value="item.ref" @input="(e: Event) => upd(gi, ii, 'ref', (e.target as HTMLInputElement).value)"
+              class="col-span-3 text-[10px] text-slate-400 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-400 focus:outline-none transition-colors"/>
+            <div class="col-span-2">
+              <select :value="item.status" @change="(e: Event) => upd(gi, ii, 'status', (e.target as HTMLSelectElement).value)"
+                class="text-[10px] px-1.5 py-0.5 rounded-md border font-semibold focus:outline-none cursor-pointer w-full" :class="stColor(item.status)">
+                <option value="normal">正常</option><option value="high">偏高</option><option value="low">偏低</option><option value="unknown">—</option>
+              </select>
             </div>
-
-            <!-- Vision & BP -->
-            <div class="grid grid-cols-2 gap-3">
-              <div class="p-4 bg-gradient-to-br from-violet-50 to-purple-50 border border-violet-100 rounded-xl">
-                <p class="text-sm text-gray-500 mb-1">视力 (左/右)</p>
-                <p class="font-bold text-xl text-gray-900">{{ extractedData.metrics.visionLeft.toFixed(1) }}/{{ extractedData.metrics.visionRight.toFixed(1) }}</p>
-                <p class="text-sm mt-1" :class="getVisionStatus(Math.min(extractedData.metrics.visionLeft, extractedData.metrics.visionRight)).color">
-                  {{ getVisionStatus(Math.min(extractedData.metrics.visionLeft, extractedData.metrics.visionRight)).label }}
-                </p>
-              </div>
-              <div class="p-4 bg-gradient-to-br from-red-50 to-rose-50 border border-red-100 rounded-xl">
-                <p class="text-sm text-gray-500 mb-1">血压</p>
-                <p class="font-bold text-xl text-gray-900">{{ extractedData.metrics.bloodPressureSystolic }}/{{ extractedData.metrics.bloodPressureDiastolic }}</p>
-                <p class="text-sm text-gray-500 mt-1">mmHg</p>
-              </div>
-            </div>
-
-            <!-- Basic Stats -->
-            <div class="grid grid-cols-4 gap-2">
-              <div class="p-3 bg-gray-50 rounded-xl text-center">
-                <p class="text-xs text-gray-500">身高</p>
-                <p class="font-semibold text-gray-900">{{ extractedData.metrics.height }}cm</p>
-              </div>
-              <div class="p-3 bg-gray-50 rounded-xl text-center">
-                <p class="text-xs text-gray-500">体重</p>
-                <p class="font-semibold text-gray-900">{{ extractedData.metrics.weight }}kg</p>
-              </div>
-              <div class="p-3 bg-gray-50 rounded-xl text-center">
-                <p class="text-xs text-gray-500">心率</p>
-                <p class="font-semibold text-gray-900">{{ extractedData.metrics.heartRate }}bpm</p>
-              </div>
-              <div class="p-3 bg-gray-50 rounded-xl text-center">
-                <p class="text-xs text-gray-500">肺活量</p>
-                <p class="font-semibold text-gray-900">{{ extractedData.metrics.lungCapacity }}ml</p>
-              </div>
-            </div>
-          </div>
-
-          <!-- Actions -->
-          <div class="flex gap-3">
-            <button @click="handleSave" class="btn btn-primary flex-1 flex items-center justify-center gap-2">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-              </svg>
-              保存到档案
+            <button @click="rmItem(gi, ii)" class="col-span-1 opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center text-slate-300 hover:text-rose-400 rounded transition-all mx-auto">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
           </div>
         </template>
-
-        <template v-else>
-          <div class="text-center py-16">
-            <div class="w-20 h-20 bg-gradient-to-br from-gray-100 to-gray-200 rounded-3xl flex items-center justify-center mx-auto mb-4 shadow-inner">
-              <svg class="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-              </svg>
-            </div>
-            <p class="text-gray-500 mb-2">上传体检表后将显示识别结果</p>
-            <p class="text-sm text-gray-400">AI 将自动提取健康数据</p>
-          </div>
-        </template>
       </div>
-    </div>
 
-    <!-- Tips -->
-    <div class="mt-8 card bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100">
-      <div class="flex items-start gap-3">
-        <div class="w-10 h-10 bg-gradient-to-br from-blue-400 to-indigo-500 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/30 flex-shrink-0">
-          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        </div>
-        <div>
-          <h4 class="font-semibold text-blue-900 mb-2">使用提示</h4>
-          <ul class="text-sm text-blue-800 space-y-2">
-            <li class="flex items-start gap-2">
-              <svg class="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4" />
-              </svg>
-              确保体检表图片清晰，光线充足
-            </li>
-            <li class="flex items-start gap-2">
-              <svg class="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4" />
-              </svg>
-              完整拍摄整张表格，避免遮挡重要信息
-            </li>
-            <li class="flex items-start gap-2">
-              <svg class="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-              识别结果仅供參考，请以实际体检报告为准
-            </li>
-          </ul>
+      <!-- ── Raw text ── -->
+      <div v-if="rawText" class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <button @click="showRaw = !showRaw" class="w-full px-4 py-2.5 flex items-center justify-between text-xs hover:bg-slate-50 transition-colors">
+          <span class="text-slate-500 font-medium">原始识别文本</span>
+          <svg class="w-3.5 h-3.5 text-slate-400 transition-transform duration-200" :class="showRaw ? 'rotate-180' : ''" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div v-show="showRaw" class="px-4 pb-3">
+          <pre class="text-xs text-slate-500 bg-slate-50 rounded-xl p-3 max-h-40 overflow-y-auto whitespace-pre-wrap font-mono leading-relaxed border border-slate-100">{{ rawText }}</pre>
         </div>
       </div>
     </div>

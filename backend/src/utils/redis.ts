@@ -38,10 +38,17 @@ async function connectRedis(): Promise<RedisClient | null> {
     }
 
     const client = new Redis(redisUrl, {
-      maxRetriesPerRequest: 3,
-      retryStrategy: (times: number) => Math.min(times * 100, 3000),
+      maxRetriesPerRequest: 1,
+      retryStrategy: (times: number) => {
+        if (times > 2) return null  // 超过3次停止重试
+        return Math.min(times * 500, 2000)
+      },
       lazyConnect: true,
+      enableOfflineQueue: false,
     });
+
+    // 静默处理连接错误，Redis 是可选依赖
+    client.on('error', () => {});
 
     await client.connect();
 

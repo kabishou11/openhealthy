@@ -37,7 +37,7 @@ const menuSubItems = [
 const navItems = [
   { name: '首页', path: '/', icon: 'home', subItems: null as typeof knowledgeSubItems | null },
   { name: '智能问答', path: '/knowledge', icon: 'qa', subItems: knowledgeSubItems },
-  { name: '健康管理', path: '/health', icon: 'health', subItems: null as typeof knowledgeSubItems | null },
+  { name: '健康管理', path: '/health/records', icon: 'health', subItems: null as typeof knowledgeSubItems | null },
   { name: '餐单食谱', path: '/menu', icon: 'menu', subItems: menuSubItems },
 ]
 

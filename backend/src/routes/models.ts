@@ -7,7 +7,7 @@ import { LLM_MODELS, EMBEDDING_MODELS, getModelScopeClient } from '../modelscope
 // Model configuration storage
 const modelConfig = {
   llm: {
-    selected: 'Qwen/Qwen3-8B',
+    selected: 'Qwen/Qwen3-235B-A22B',
     temperature: 0.7,
     maxTokens: 4096,
     topP: 0.9,

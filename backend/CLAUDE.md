@@ -1,7 +1,7 @@
 # NutriMind AI Nutrition Assistant - Project Documentation
 
-> Last Updated: 2026-02-06
-> Version: 2.1
+> Last Updated: 2026-02-24
+> Version: 3.5
 
 ## Progress Tracker
 
@@ -18,6 +18,75 @@
 - [x] Frontend: Fluid cursor, animations, clamp typography
 - [x] Frontend pages: Home, Chat, Recipes, Menu, Analysis
 - [x] Fixed fluid cursor to show native cursor with trail effect
+- [x] Redis ECONNREFUSED 静默处理
+- [x] Python Windows GBK编码修复（PYTHONIOENCODING=utf-8）
+- [x] 模型配置页面重新设计（下拉框替代卡片网格）
+- [x] 健康管理系统：OCR全量提取 + LLM整理 + 动态字段存储
+- [x] **OCR 服务 v4（在线 VL 模型）**：删除本地 Python OCR，改用 ModelScope Qwen3-VL-235B 在线 API
+- [x] **健康档案三栏联动**：扫描 → 档案列表 → 详情+图片+内联编辑 → 右栏操作
+- [x] **跨页面健康上下文传递**：sessionStorage.healthContext → 智能问答/餐单页自动注入
+- [x] **健康档案 v3.3 — 分组结构存储**：groups_data 字段（key/value/unit/ref/status），OCRScanner 分组表格+内联编辑+异常高亮，records.vue 分组表格展示+右栏异常概览
+- [x] **健康档案 v3.4 — 医生分析 + 列表修复**：列表接口补充 groups 字段；基本信息分组卡片展示（不显示参考范围/状态）；OCRScanner 扫描后可选医生（王主任/李医生/张医生/陈医生）进行流式分析，支持自定义医生名字；新增 `/api/v1/analyze-health` 接口
+- [x] **健康档案 v3.5 — OCRScanner 全面重写**：三阶段流程（upload→result→done），基本信息卡片网格+检测指标表格双模式，医生流式分析（SSE），全字段始终可编辑，拖拽上传，图片缩放，原始文本折叠
+
+### 🏗️ 健康档案系统架构（v3.3）
+
+**核心流程**：
+```
+上传体检表图片
+    ↓
+POST /api/v1/scan-health（Qwen3-VL-235B 在线 API）
+    ↓ 返回 { title, rawText, groups: [{ name, items: [{ key, value, unit, ref, status }] }] }
+OCRScanner.vue 分组表格展示，内联编辑（无需切换编辑模式），异常行高亮
+    ↓ 用户确认后保存（含图片 base64）
+POST /api/v1/personal-health → SQLite personal_health_records（groups_data + image_data）
+    ↓
+records.vue 三栏布局：
+  左栏（col-3）：记录列表，点击加载详情
+  中栏（col-5）：分组指标表格（指标/检测值/单位/参考范围/状态），异常行红/橙背景，内联编辑
+  右栏（col-4）：快捷操作（AI分析/餐单/食谱）+ 异常指标概览（偏高/偏低汇总）
+    ↓ 点击操作按钮
+sessionStorage.setItem('healthContext', { title, data })
+    ↓ 跳转到目标页面
+knowledge/index.vue：自动追加体检数据提示消息，第一条用户消息携带完整上下文
+menu.vue：显示"已根据体检数据个性化调整"横幅，BMI 自动调整热量目标
+```
+
+**数据结构**：
+```typescript
+// groups_data 字段存储格式
+groups: [
+  {
+    name: "血常规",
+    items: [
+      { key: "白细胞", value: "5.2", unit: "×10⁹/L", ref: "3.5-9.5", status: "normal" },
+      { key: "血红蛋白", value: "98", unit: "g/L", ref: "115-150", status: "low" }
+    ]
+  }
+]
+// status: "normal" | "high" | "low" | "unknown"
+// 向后兼容：旧记录无 groups_data 时，自动将 structured_data 转为单分组
+```
+
+**关键文件**：
+- `backend/src/routes/scan-health.ts` — VL 模型调用，返回 groups 结构（含 status 判断）
+- `backend/src/routes/personal-health.ts` — CRUD，含 `image_data` + `groups_data` 字段
+- `backend/src/models/db.ts` — `personal_health_records` 表，含 `image_data`/`groups_data` 迁移
+- `frontend/components/OCRScanner.vue` — 分组表格，内联编辑，异常高亮，拖拽上传
+- `frontend/pages/health/records.vue` — 三栏联动，分组表格展示，右栏异常概览，goWithContext()
+- `frontend/pages/knowledge/index.vue` — onMounted 读取 healthContext，自动注入对话
+- `frontend/pages/menu.vue` — onMounted 读取 healthContext，显示横幅，调整热量目标
+
+**环境变量**：
+```env
+MODELSCOPE_TOKEN=your_token   # VL 模型鉴权
+MODELSCOPE_API_URL=https://api-inference.modelscope.cn/v1  # 默认值
+```
+
+**VL 模型说明**：
+- `Qwen/Qwen3-VL-235B-A22B-Instruct` ✅ 视觉语言模型（主用）
+- `Qwen/Qwen3-VL-30B-A3B-Instruct` ✅ 视觉语言模型（备用）
+- `Qwen/Qwen3.5-397B-A17B` ❌ 纯文本模型，不支持图片
 
 ### 🚧 In Progress
 - [ ] Complete LangGraph workflow implementation

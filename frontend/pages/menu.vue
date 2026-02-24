@@ -84,8 +84,11 @@ const loadStudentProfile = (): StudentProfile | null => {
 
 const studentProfile = computed(() => loadStudentProfile())
 
+const dailyCaloriesOverride = ref<number | null>(null)
+
 // Calculate daily calorie target based on student profile
 const dailyCalories = computed(() => {
+  if (dailyCaloriesOverride.value !== null) return dailyCaloriesOverride.value
   const base = 1800
   if (!studentProfile.value) return base
 
@@ -437,9 +440,34 @@ watch(selectedVariation, () => {
   }
 })
 
+// 健康档案上下文（从健康档案页跳转过来时注入）
+const healthContextBanner = ref<{ title: string; summary: string } | null>(null)
+
 // Initialize with variation
 onMounted(() => {
   applyVariation(menuVariations[selectedVariation.value])
+
+  try {
+    const raw = sessionStorage.getItem('healthContext')
+    if (raw) {
+      const ctx = JSON.parse(raw) as { title: string; data: Record<string, any> }
+      sessionStorage.removeItem('healthContext')
+
+      const fields = Object.entries(ctx.data || {}).slice(0, 6).map(([k, v]) => `${k} ${v}`).join(' · ')
+      healthContextBanner.value = { title: ctx.title, summary: fields || '已加载体检数据' }
+
+      // 根据体检数据调整热量目标
+      const bmiEntry = Object.entries(ctx.data || {}).find(([k]) => k.toLowerCase().includes('bmi') || k.includes('体质指数'))
+      if (bmiEntry) {
+        const bmiVal = parseFloat(String(bmiEntry[1]))
+        if (!isNaN(bmiVal)) {
+          // 通过 studentProfile 覆盖不现实，直接用 dailyCaloriesOverride
+          dailyCaloriesOverride.value = bmiVal < 18.5 ? Math.round(1800 * 1.15) : bmiVal >= 25 ? Math.round(1800 * 0.85) : 1800
+        }
+      }
+    }
+  }
+  catch { /* ignore */ }
 })
 </script>
 
@@ -459,6 +487,27 @@ onMounted(() => {
     </Transition>
 
     <div class="container mx-auto px-4 py-8">
+      <!-- 健康档案上下文横幅 -->
+      <Transition name="toast">
+        <div v-if="healthContextBanner"
+          class="mb-5 flex items-start gap-3 px-4 py-3.5 bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-200 rounded-2xl">
+          <div class="w-8 h-8 rounded-xl bg-violet-500 flex items-center justify-center flex-shrink-0 mt-0.5">
+            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+            </svg>
+          </div>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-semibold text-violet-800">已根据体检数据「{{ healthContextBanner.title }}」个性化调整</p>
+            <p class="text-xs text-violet-500 mt-0.5 truncate">{{ healthContextBanner.summary }}</p>
+          </div>
+          <button @click="healthContextBanner = null" class="text-violet-300 hover:text-violet-500 transition-colors flex-shrink-0">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+      </Transition>
+
       <!-- Header -->
       <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-8">
         <div>

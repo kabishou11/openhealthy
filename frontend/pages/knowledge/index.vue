@@ -122,6 +122,16 @@ const sendMessage = async () => {
   isLoading.value = true
   scrollToBottom()
 
+  // 若有健康上下文，拼接到消息前缀（只用一次）
+  let messageWithContext = userMessage
+  if (healthContext.value) {
+    const fields = Object.entries(healthContext.value.data || {})
+      .map(([k, v]) => `${k}：${v}`)
+      .join('，')
+    messageWithContext = `【用户体检数据 - ${healthContext.value.title}】${fields}\n\n用户问题：${userMessage}`
+    healthContext.value = null  // 只注入一次
+  }
+
   try {
     const config = useRuntimeConfig()
     const apiBase = config.public.apiBase || 'http://localhost:3001/api/v1'
@@ -134,7 +144,7 @@ const sendMessage = async () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: userMessage,
+          message: messageWithContext,
           model: selectedModel.value,
           sessionId: sessionId.value,
         }),
@@ -214,9 +224,34 @@ const selectCategory = (id: string) => {
   selectedCategory.value = selectedCategory.value === id ? null : id
 }
 
+// 从健康档案跳转过来时，自动注入体检上下文
+const healthContext = ref<{ title: string; data: Record<string, any> } | null>(null)
+
 onMounted(() => {
   fetchModels()
   scrollToBottom()
+
+  try {
+    const raw = sessionStorage.getItem('healthContext')
+    if (raw) {
+      healthContext.value = JSON.parse(raw)
+      sessionStorage.removeItem('healthContext')
+
+      const ctx = healthContext.value!
+      const fields = Object.entries(ctx.data || {})
+        .slice(0, 12)
+        .map(([k, v]) => `${k}：${v}`)
+        .join('、')
+
+      messages.value.push({
+        id: 'health-context',
+        role: 'assistant',
+        content: `我已加载您的体检数据「**${ctx.title}**」，主要指标：${fields || '（无结构化数据）'}。\n\n您可以直接问我：\n- 这些指标有哪些异常？\n- 针对我的情况应该怎么吃？\n- 有哪些需要注意的饮食禁忌？`,
+        timestamp: new Date(),
+      })
+    }
+  }
+  catch { /* ignore */ }
 })
 </script>
 

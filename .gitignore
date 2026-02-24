@@ -7,6 +7,7 @@ dist/
 build/
 .next/
 .output/
+.nuxt/
 
 # Environment
 .env
@@ -36,6 +37,11 @@ coverage/
 # Database
 *.sqlite
 *.db
+*.db-shm
+*.db-wal
+
+# Temp / test
+test_write.txt
 
 # Neo4j
 neo4j/data/

@@ -18,16 +18,11 @@ const envSchema = z.object({
 
   // OpenAI API (备选/兼容)
   OPENAI_API_KEY: z.string().optional(),
-  OPENAI_MODEL: z.string().default('Qwen/Qwen3-8B'),
+  OPENAI_MODEL: z.string().default('Qwen/Qwen3-235B-A22B'),
   OPENAI_API_BASE: z.string().default('https://api-inference.modelscope.cn/v1'),
 
-  // ============================================
-  // OCR APIs
-  // ============================================
-  ZHIPU_API_KEY: z.string().optional(),
-  ZHIPU_API_BASE: z.string().default('https://open.bigmodel.cn/api/paas/v4'),
-  BAIDU_OCR_API_KEY: z.string().optional(),
-  BAIDU_OCR_SECRET_KEY: z.string().optional(),
+  // VL Model for image analysis
+  VL_MODEL: z.string().default('Qwen/Qwen2.5-VL-7B-Instruct'),
 
   // Database
   DATABASE_URL: z.string().default('postgresql://localhost:5432/nutrimind'),
@@ -81,16 +76,11 @@ export const config = {
 
   // OpenAI (兼容)
   openaiApiKey: process.env.OPENAI_API_KEY || '',
-  openaiModel: process.env.OPENAI_MODEL || 'Qwen/Qwen3-8B',
+  openaiModel: process.env.OPENAI_MODEL || 'Qwen/Qwen3-235B-A22B',
   openaiApiBase: process.env.OPENAI_API_BASE || 'https://api-inference.modelscope.cn/v1',
 
-  // ============================================
-  // OCR APIs
-  // ============================================
-  zhipuApiKey: process.env.ZHIPU_API_KEY || '',
-  zhipuApiBase: process.env.ZHIPU_API_BASE || 'https://open.bigmodel.cn/api/paas/v4',
-  baiduOcrApiKey: process.env.BAIDU_OCR_API_KEY || '',
-  baiduOcrSecretKey: process.env.BAIDU_OCR_SECRET_KEY || '',
+  // VL model for image analysis
+  vlModel: process.env.VL_MODEL || 'Qwen/Qwen2.5-VL-7B-Instruct',
 
   // Database
   databaseUrl: process.env.DATABASE_URL || './data/nutrimind.db',
@@ -126,9 +116,6 @@ export const config = {
   // Paths
   kbPath: process.env.KB_PATH || './kb',
   recipesPath: process.env.RECIPES_PATH || './kb/recipes',
-
-  // OCR Service URL
-  ocrUrl: process.env.OCR_URL || 'http://localhost:8081',
 };
 
 export type Config = typeof config;
