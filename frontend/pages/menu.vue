@@ -100,10 +100,17 @@ const defaultTemplate: DayMenu[] = weekDays.map((day, i) => ({
   totalCalories: 1520,
 }))
 
+const generatedWeekMenu = ref<DayMenu[] | null>(null)
+
+// Clear generated menu when group changes
+watch(selectedGroup, () => { generatedWeekMenu.value = null })
+
 const weekMenu = computed<DayMenu[]>(() => {
+  if (generatedWeekMenu.value?.length) {
+    return weekDays.map(day => generatedWeekMenu.value!.find(d => d.day === day) || { ...defaultTemplate[0], day })
+  }
   const template = menuTemplates[selectedGroup.value]
   if (!template) return defaultTemplate
-  // Fill missing days with default
   return weekDays.map(day => template.find(d => d.day === day) || { ...defaultTemplate[0], day })
 })
 
@@ -146,8 +153,32 @@ const healthContext = ref<any>(null)
 
 const generateMenu = async () => {
   generating.value = true
-  await new Promise(r => setTimeout(r, 1500))
-  generating.value = false
+  try {
+    const res = await $fetch('/api/v1/menu/generate', {
+      method: 'POST',
+      body: {
+        userId: authStore.user?.id,
+        targets: { calories: currentGroup.value.calories },
+        options: { groupId: selectedGroup.value },
+      },
+    })
+    const plan = (res as any)?.plan?.weeklyPlan
+    if (plan?.length) {
+      generatedWeekMenu.value = plan.map((d: any) => ({
+        day: d.day,
+        meals: d.meals.map((m: any) => ({
+          type: m.name,
+          dishes: (m.dishes as any[]).map((dish: any) => typeof dish === 'string' ? dish : dish.name),
+          calories: m.totalNutrition?.calories ?? 0,
+        })),
+        totalCalories: d.calories,
+      }))
+    }
+  } catch (e) {
+    console.error('生成餐单失败', e)
+  } finally {
+    generating.value = false
+  }
 }
 
 onMounted(() => {
